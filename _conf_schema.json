@@ -1,0 +1,7 @@
+{
+  "emoji_id": {
+    "type": "int",
+    "description": "LLOneBot 的 QQ 表情 ID；默认 124（QQ“OK”，用于表达 GET），QQ“收到”为 428",
+    "default": 124
+  }
+}

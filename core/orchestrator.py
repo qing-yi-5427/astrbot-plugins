@@ -67,7 +67,7 @@ class SearchOrchestrator:
 
     async def search(self, image: ImagePayload, route: str = "auto") -> SearchReport:
         route = route if route in {"auto", "saucenao", "tracemoe"} else "auto"
-        cache_key = f"v3:{route}:{image.sha256}"
+        cache_key = f"v4:{route}:{image.sha256}"
         cached = await self.cache.get(cache_key)
         if cached is not None:
             return cached

@@ -47,6 +47,7 @@ def test_report_mentions_multiple_images():
     assert "所属作品：Example Series" in text
     assert "角色：Alice, Bob" in text
     assert "作品链接：https://example/work" in text
+    assert "来源：" not in text
 
 
 def test_adult_result_hides_title_and_link_in_group():

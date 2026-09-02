@@ -49,6 +49,38 @@ def test_saucenao_parser_filters_low_confidence():
     assert result.hits[0].work_url == "https://www.pixiv.net/artworks/123"
 
 
+def test_saucenao_uses_work_source_and_ignores_external_source_pages():
+    engine = SauceNaoEngine(
+        Session(),
+        api_key="key",
+        high_threshold=85,
+        possible_threshold=70,
+        hide=2,
+    )
+    result = engine.parse_response(
+        {
+            "header": {"status": 0},
+            "results": [
+                {
+                    "header": {
+                        "similarity": "89.9",
+                        "index_name": "Danbooru",
+                    },
+                    "data": {
+                        "source": "https://i.pximg.net/img-original/example.jpg",
+                        "member_name": "zhudouzi",
+                        "ext_urls": ["https://danbooru.donmai.us/posts/12109343"],
+                    },
+                }
+            ],
+        }
+    )
+    hit = result.hits[0]
+    assert hit.title == "Danbooru"
+    assert hit.work_url == "https://i.pximg.net/img-original/example.jpg"
+    assert "danbooru.donmai.us" not in hit.work_url
+
+
 def test_tracemoe_parser_marks_adult_and_time():
     engine = TraceMoeEngine(
         Session(), api_key="", high_threshold=90, possible_threshold=87

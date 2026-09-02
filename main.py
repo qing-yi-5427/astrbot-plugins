@@ -214,7 +214,7 @@ class QingImageSourcePlugin(Star):
         yield event.plain_result(f"已清除 {count} 条搜图缓存。")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("搜图帮助")
+    @filter.command("动漫搜图帮助")
     async def search_help(self, event: AstrMessageEvent):
         """显示动漫搜图插件帮助。"""
         keywords = (

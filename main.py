@@ -27,7 +27,7 @@ from .core.reaction import add_reaction
 from .core.trigger import TriggerMatcher
 
 PLUGIN_NAME = "astrbot_plugin_qing_image_source"
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 
 
 @register(PLUGIN_NAME, "qingyi", "搜索二次元插画与动画截图来源", VERSION)

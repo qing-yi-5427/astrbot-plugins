@@ -44,7 +44,7 @@ async def test_high_confidence_illustration_stops_before_trace(tmp_path: Path):
                     engine="SauceNAO",
                     kind="illustration",
                     title="A",
-                    source_url="https://example/a",
+                    work_url="https://example/a",
                     similarity=95,
                     confidence=Confidence.HIGH,
                 )
@@ -75,7 +75,7 @@ async def test_anime_sauce_result_also_calls_trace(tmp_path: Path):
                     engine="SauceNAO",
                     kind="anime",
                     title="A",
-                    source_url="https://example/a",
+                    work_url="https://example/a",
                     similarity=96,
                     confidence=Confidence.HIGH,
                 )

@@ -29,6 +29,8 @@ def test_saucenao_parser_filters_low_confidence():
                         "title": "Example",
                         "member_name": "Artist",
                         "pixiv_id": 123,
+                        "material": ["Series A", "Series B"],
+                        "characters": "Character A",
                         "ext_urls": ["https://www.pixiv.net/artworks/123"],
                     },
                 },
@@ -42,6 +44,9 @@ def test_saucenao_parser_filters_low_confidence():
     assert len(result.hits) == 1
     assert result.hits[0].confidence is Confidence.HIGH
     assert result.hits[0].creator == "Artist"
+    assert result.hits[0].material == "Series A, Series B"
+    assert result.hits[0].characters == "Character A"
+    assert result.hits[0].work_url == "https://www.pixiv.net/artworks/123"
 
 
 def test_tracemoe_parser_marks_adult_and_time():

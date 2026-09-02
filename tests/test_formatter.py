@@ -35,13 +35,18 @@ def test_report_mentions_multiple_images():
         engine="SauceNAO",
         kind="illustration",
         title="Example",
-        source_url="https://example/source",
+        work_url="https://example/work",
+        material="Example Series",
+        characters="Alice, Bob",
         similarity=91.2,
         confidence=Confidence.HIGH,
     )
     text = format_report(SearchReport([hit]), multiple_images=True)
     assert "只查询第一张" in text
     assert "91.2%" in text
+    assert "所属作品：Example Series" in text
+    assert "角色：Alice, Bob" in text
+    assert "作品链接：https://example/work" in text
 
 
 def test_adult_result_hides_title_and_link_in_group():
@@ -49,7 +54,7 @@ def test_adult_result_hides_title_and_link_in_group():
         engine="trace.moe",
         kind="anime",
         title="Sensitive title",
-        source_url="https://example/sensitive",
+        work_url="https://example/sensitive",
         confidence=Confidence.HIGH,
         adult=True,
     )

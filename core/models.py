@@ -24,8 +24,10 @@ class SearchHit:
     engine: str
     kind: str
     title: str
-    source_url: str = ""
+    work_url: str = ""
     creator: str = ""
+    material: str = ""
+    characters: str = ""
     thumbnail_url: str = ""
     similarity: float | None = None
     confidence: Confidence = Confidence.LOW
@@ -48,8 +50,8 @@ class SearchHit:
         return cls(**values)
 
     def dedupe_key(self) -> str:
-        if self.source_url:
-            return self.source_url.casefold()
+        if self.work_url:
+            return self.work_url.casefold()
         return f"{self.engine.casefold()}|{self.title.casefold()}|{self.episode.casefold()}"
 
 

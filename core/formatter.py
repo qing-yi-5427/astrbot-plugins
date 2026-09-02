@@ -60,6 +60,10 @@ def format_report(
         lines.append(f"作品：{hit.title}")
         if hit.creator:
             lines.append(f"作者：{hit.creator}")
+        if hit.material:
+            lines.append(f"所属作品：{hit.material}")
+        if hit.characters:
+            lines.append(f"角色：{hit.characters}")
         if hit.episode:
             lines.append(f"集数：{hit.episode}")
         if hit.from_seconds is not None:
@@ -68,10 +72,10 @@ def format_report(
             lines.append(f"时间：{span}" + (f" - {end}" if end else ""))
         if hit.adult:
             lines.append("内容：疑似成人内容，已隐藏预览")
-        if hit.source_url:
-            lines.append(f"来源：{hit.source_url}")
+        if hit.work_url:
+            lines.append(f"作品链接：{hit.work_url}")
         else:
-            lines.append("来源：该引擎未返回可点击原链接")
+            lines.append("作品链接：该引擎未返回可点击链接")
     if report.warnings:
         lines.append("\n提示：" + "；".join(dict.fromkeys(report.warnings)))
     return "\n".join(lines)

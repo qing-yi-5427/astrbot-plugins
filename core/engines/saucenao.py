@@ -95,10 +95,11 @@ class SauceNaoEngine:
             urls = data.get("ext_urls", [])
             if not isinstance(urls, list):
                 urls = []
-            source_url = next((_safe_url(url) for url in urls if _safe_url(url)), "")
             pixiv_id = _first_text(data, "pixiv_id")
-            if not source_url and pixiv_id.isdigit():
-                source_url = f"https://www.pixiv.net/artworks/{pixiv_id}"
+            if pixiv_id.isdigit():
+                work_url = f"https://www.pixiv.net/artworks/{pixiv_id}"
+            else:
+                work_url = next((_safe_url(url) for url in urls if _safe_url(url)), "")
 
             index_name = str(result_header.get("index_name", ""))
             kind = (
@@ -116,10 +117,12 @@ class SauceNaoEngine:
                     or index_name
                     or "未知作品",
                     creator=_first_text(data, "member_name", "creator", "author_name"),
-                    source_url=source_url,
+                    work_url=work_url,
                     thumbnail_url=_safe_url(result_header.get("thumbnail")),
                     similarity=similarity,
                     confidence=confidence,
+                    material=_first_text(data, "material"),
+                    characters=_first_text(data, "characters"),
                     episode=_first_text(data, "part", "episode"),
                     adult=adult,
                     uncertain=confidence is not Confidence.HIGH,

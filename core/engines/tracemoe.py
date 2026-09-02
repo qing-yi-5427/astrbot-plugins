@@ -87,15 +87,13 @@ class TraceMoeEngine:
             if not isinstance(anilist, dict):
                 anilist = {}
             raw_id = str(anilist.get("id", item.get("anilist", "")) or "")
-            source_url = (
-                f"https://anilist.co/anime/{raw_id}" if raw_id.isdigit() else ""
-            )
+            work_url = f"https://anilist.co/anime/{raw_id}" if raw_id.isdigit() else ""
             hits.append(
                 SearchHit(
                     engine=self.name,
                     kind="anime",
                     title=_title(anilist),
-                    source_url=source_url,
+                    work_url=work_url,
                     thumbnail_url=_safe_url(item.get("image")),
                     similarity=similarity,
                     confidence=confidence,

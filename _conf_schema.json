@@ -109,5 +109,17 @@
         "default": false
       }
     }
+  },
+  "output": {
+    "description": "输出设置",
+    "type": "object",
+    "items": {
+      "force_text_message": {
+        "description": "始终使用文字消息，不进行文本转图片",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后，本插件的文字无论多长都不会被 AstrBot 全局文转图规则转换成图片。"
+      }
+    }
   }
 }

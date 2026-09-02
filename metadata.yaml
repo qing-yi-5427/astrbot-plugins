@@ -2,7 +2,7 @@ name: astrbot_plugin_qing_image_source
 display_name: 动漫搜图
 short_desc: 通过 SauceNAO 与 trace.moe 搜索二次元图片来源。
 desc: 支持当前消息或引用消息中的图片，以可配置关键词触发动漫插画来源和动画截图搜索。
-version: 0.1.4
+version: 0.1.5
 author: qingyi
 repo: "https://github.com/qing-yi-5427/astrbot_plugin_qing_image_source"
 astrbot_version: ">=4.16,<5"

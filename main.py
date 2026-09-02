@@ -27,7 +27,7 @@ from .core.reaction import add_reaction
 from .core.trigger import TriggerMatcher
 
 PLUGIN_NAME = "astrbot_plugin_qing_image_source"
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 
 
 @register(PLUGIN_NAME, "qingyi", "搜索二次元插画与动画截图来源", VERSION)
@@ -90,6 +90,20 @@ class QingImageSourcePlugin(Star):
     def _ready(self) -> bool:
         return self.orchestrator is not None and self.cache is not None
 
+    def _plain_result(self, event: AstrMessageEvent, text: str):
+        result = event.plain_result(text)
+        if self.settings.output.force_text_message:
+            result.use_t2i(False)
+        return result
+
+    def _chain_result(
+        self, event: AstrMessageEvent, chain: list[Comp.BaseMessageComponent]
+    ):
+        result = event.chain_result(chain)
+        if self.settings.output.force_text_message:
+            result.use_t2i(False)
+        return result
+
     @filter.event_message_type(filter.EventMessageType.ALL, priority=10)
     async def on_message(self, event: AstrMessageEvent):
         if not self._ready():
@@ -135,7 +149,7 @@ class QingImageSourcePlugin(Star):
         key = (str(event.unified_msg_origin), str(event.get_sender_id()))
         remaining = await self.cooldown.acquire(key)
         if remaining > 0:
-            yield event.plain_result(f"操作太快，请 {remaining:.1f} 秒后再试。")
+            yield self._plain_result(event, f"操作太快，请 {remaining:.1f} 秒后再试。")
             return
 
         try:
@@ -166,19 +180,19 @@ class QingImageSourcePlugin(Star):
             thumbnail = preview_url(report)
             if thumbnail:
                 chain.append(Comp.Image.fromURL(thumbnail))
-            yield event.chain_result(chain)
+            yield self._chain_result(event, chain)
         except ImageResolutionError as exc:
-            yield event.plain_result(f"无法处理这张图片：{exc}")
+            yield self._plain_result(event, f"无法处理这张图片：{exc}")
         except Exception as exc:  # noqa: BLE001 - keep plugin failures inside event boundary
             logger.exception("[%s] 搜图失败: %s", PLUGIN_NAME, exc)
-            yield event.plain_result("搜图失败，请稍后再试。")
+            yield self._plain_result(event, "搜图失败，请稍后再试。")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("搜图状态")
     async def search_status(self, event: AstrMessageEvent):
         """查看搜图引擎、缓存与最近额度状态。"""
         if not self._ready():
-            yield event.plain_result("插件尚未完成初始化。")
+            yield self._plain_result(event, "插件尚未完成初始化。")
             return
         cache_stats = await self.cache.stats()  # type: ignore[union-attr]
         quotas = self.orchestrator.last_quota  # type: ignore[union-attr]
@@ -201,17 +215,17 @@ class QingImageSourcePlugin(Star):
                 f"最近额度：{quota_text}",
             ]
         )
-        yield event.plain_result(text)
+        yield self._plain_result(event, text)
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("搜图清缓存")
     async def clear_search_cache(self, event: AstrMessageEvent):
         """清除搜图结果缓存。"""
         if self.cache is None:
-            yield event.plain_result("缓存尚未初始化。")
+            yield self._plain_result(event, "缓存尚未初始化。")
             return
         count = await self.cache.clear()
-        yield event.plain_result(f"已清除 {count} 条搜图缓存。")
+        yield self._plain_result(event, f"已清除 {count} 条搜图缓存。")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("动漫搜图帮助")
@@ -222,9 +236,10 @@ class QingImageSourcePlugin(Star):
             + self.settings.trigger.saucenao_keywords
             + self.settings.trigger.tracemoe_keywords
         )
-        yield event.plain_result(
+        yield self._plain_result(
+            event,
             "动漫搜图使用方法：\n"
             "1. 发送关键词并附带图片；或引用图片后发送关键词。\n"
             "2. 引用图片优先，多图只查询第一张。\n"
-            f"3. 当前关键词：{', '.join(dict.fromkeys(keywords))}"
+            f"3. 当前关键词：{', '.join(dict.fromkeys(keywords))}",
         )

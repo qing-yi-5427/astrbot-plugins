@@ -93,6 +93,11 @@ class SafetySettings:
 
 
 @dataclass(slots=True)
+class OutputSettings:
+    force_text_message: bool = True
+
+
+@dataclass(slots=True)
 class PluginSettings:
     trigger: TriggerSettings = field(default_factory=TriggerSettings)
     search: SearchSettings = field(default_factory=SearchSettings)
@@ -100,6 +105,7 @@ class PluginSettings:
     cache: CacheSettings = field(default_factory=CacheSettings)
     network: NetworkSettings = field(default_factory=NetworkSettings)
     safety: SafetySettings = field(default_factory=SafetySettings)
+    output: OutputSettings = field(default_factory=OutputSettings)
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> PluginSettings:
@@ -110,6 +116,7 @@ class PluginSettings:
         cache = _section(data, "cache")
         network = _section(data, "network")
         safety = _section(data, "safety")
+        output = _section(data, "output")
 
         match_mode = str(trigger.get("match_mode", "contains")).lower()
         if match_mode not in {"contains", "exact"}:
@@ -180,5 +187,8 @@ class PluginSettings:
                 allow_adult_links_in_private=bool(
                     safety.get("allow_adult_links_in_private", False)
                 ),
+            ),
+            output=OutputSettings(
+                force_text_message=bool(output.get("force_text_message", True)),
             ),
         )

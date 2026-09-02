@@ -17,9 +17,11 @@ class SearchOrchestrator:
         try:
             outcome = await engine.search(image)
         except SearchEngineError as exc:
-            return EngineOutcome(engine.name, warning=exc.message)
+            return EngineOutcome(engine.name, warning=f"{engine.name}：{exc.message}")
         except Exception:  # noqa: BLE001 - isolate unexpected third-party failures
-            return EngineOutcome(engine.name, warning="引擎返回异常，已跳过")
+            return EngineOutcome(
+                engine.name, warning=f"{engine.name}：引擎返回异常，已跳过"
+            )
         if outcome.quota:
             self.last_quota[outcome.engine] = dict(outcome.quota)
         return outcome
@@ -65,7 +67,7 @@ class SearchOrchestrator:
 
     async def search(self, image: ImagePayload, route: str = "auto") -> SearchReport:
         route = route if route in {"auto", "saucenao", "tracemoe"} else "auto"
-        cache_key = f"v1:{route}:{image.sha256}"
+        cache_key = f"v2:{route}:{image.sha256}"
         cached = await self.cache.get(cache_key)
         if cached is not None:
             return cached
@@ -86,5 +88,7 @@ class SearchOrchestrator:
             engines_used=[outcome.engine for outcome in outcomes],
             warnings=[outcome.warning for outcome in outcomes if outcome.warning],
         )
-        await self.cache.set(cache_key, report)
+        # Transient API/configuration failures must not poison the result cache.
+        if not report.warnings:
+            await self.cache.set(cache_key, report)
         return report

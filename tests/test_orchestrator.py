@@ -52,12 +52,20 @@ async def test_high_confidence_illustration_stops_before_trace(tmp_path: Path):
         ),
     )
     trace = FakeEngine("trace.moe", EngineOutcome("trace.moe"))
+    ascii2d = FakeEngine("Ascii2D", EngineOutcome("Ascii2D"))
     cache = ResultCache(tmp_path / "cache.json", enabled=True, ttl_seconds=60)
-    orchestrator = SearchOrchestrator(sauce, trace, cache, max_results=3)
+    orchestrator = SearchOrchestrator(
+        sauce,
+        trace,
+        cache,
+        max_results=3,
+        ascii2d=ascii2d,
+    )
     report = await orchestrator.search(image())
     assert len(report.hits) == 1
     assert sauce.calls == 1
     assert trace.calls == 0
+    assert ascii2d.calls == 0
 
     cached = await orchestrator.search(image())
     assert cached.cache_hit
@@ -102,3 +110,68 @@ async def test_engine_errors_are_named_and_not_cached(tmp_path: Path):
     assert first.warnings == ["SauceNAO：请求失败（HTTP 403）"]
     assert not second.cache_hit
     assert sauce.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_ascii2d_runs_only_after_other_engines_lack_high_confidence_link(
+    tmp_path: Path,
+):
+    sauce = FakeEngine("SauceNAO", EngineOutcome("SauceNAO"))
+    trace = FakeEngine("trace.moe", EngineOutcome("trace.moe"))
+    ascii2d = FakeEngine(
+        "Ascii2D",
+        EngineOutcome(
+            "Ascii2D",
+            [
+                SearchHit(
+                    engine="Ascii2D",
+                    kind="illustration",
+                    title="Fallback",
+                    work_url="https://example/fallback",
+                    confidence=Confidence.POSSIBLE,
+                )
+            ],
+        ),
+    )
+    cache = ResultCache(tmp_path / "cache.json", enabled=False, ttl_seconds=60)
+    orchestrator = SearchOrchestrator(
+        sauce,
+        trace,
+        cache,
+        max_results=3,
+        ascii2d=ascii2d,
+    )
+    report = await orchestrator.search(image())
+    assert ascii2d.calls == 1
+    assert report.hits[0].engine == "Ascii2D"
+
+
+@pytest.mark.asyncio
+async def test_trace_high_confidence_result_skips_ascii2d(tmp_path: Path):
+    sauce = FakeEngine("SauceNAO", EngineOutcome("SauceNAO"))
+    trace = FakeEngine(
+        "trace.moe",
+        EngineOutcome(
+            "trace.moe",
+            [
+                SearchHit(
+                    engine="trace.moe",
+                    kind="anime",
+                    title="Anime",
+                    work_url="https://anilist.co/anime/1",
+                    confidence=Confidence.HIGH,
+                )
+            ],
+        ),
+    )
+    ascii2d = FakeEngine("Ascii2D", EngineOutcome("Ascii2D"))
+    cache = ResultCache(tmp_path / "cache.json", enabled=False, ttl_seconds=60)
+    orchestrator = SearchOrchestrator(
+        sauce,
+        trace,
+        cache,
+        max_results=3,
+        ascii2d=ascii2d,
+    )
+    await orchestrator.search(image())
+    assert ascii2d.calls == 0

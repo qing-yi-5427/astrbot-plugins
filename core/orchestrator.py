@@ -6,9 +6,18 @@ from .models import Confidence, EngineOutcome, ImagePayload, SearchHit, SearchRe
 
 
 class SearchOrchestrator:
-    def __init__(self, saucenao, tracemoe, cache: ResultCache, *, max_results: int):
+    def __init__(
+        self,
+        saucenao,
+        tracemoe,
+        cache: ResultCache,
+        *,
+        max_results: int,
+        ascii2d=None,
+    ):
         self.saucenao = saucenao
         self.tracemoe = tracemoe
+        self.ascii2d = ascii2d
         self.cache = cache
         self.max_results = max_results
         self.last_quota: dict[str, dict[str, str]] = {}
@@ -39,7 +48,7 @@ class SearchOrchestrator:
 
     @staticmethod
     def _merge(outcomes: list[EngineOutcome], limit: int) -> list[SearchHit]:
-        engine_priority = {"SauceNAO": 0, "trace.moe": 1}
+        engine_priority = {"SauceNAO": 0, "trace.moe": 1, "Ascii2D": 2}
         confidence_priority = {
             Confidence.HIGH: 0,
             Confidence.POSSIBLE: 1,
@@ -67,7 +76,7 @@ class SearchOrchestrator:
 
     async def search(self, image: ImagePayload, route: str = "auto") -> SearchReport:
         route = route if route in {"auto", "saucenao", "tracemoe"} else "auto"
-        cache_key = f"v4:{route}:{image.sha256}"
+        cache_key = f"v5:{route}:{image.sha256}"
         cached = await self.cache.get(cache_key)
         if cached is not None:
             return cached
@@ -82,6 +91,13 @@ class SearchOrchestrator:
             outcomes.append(sauce)
             if self._should_trace(sauce):
                 outcomes.append(await self._call(self.tracemoe, image))
+            has_high_confidence_link = any(
+                hit.confidence is Confidence.HIGH and bool(hit.work_url)
+                for outcome in outcomes
+                for hit in outcome.hits
+            )
+            if self.ascii2d is not None and not has_high_confidence_link:
+                outcomes.append(await self._call(self.ascii2d, image))
 
         report = SearchReport(
             hits=self._merge(outcomes, self.max_results),

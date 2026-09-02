@@ -53,6 +53,26 @@
         "hint": "未配置时跳过 SauceNAO，不会记录或输出密钥。",
         "obvious_hint": true
       },
+      "enable_ascii2d": {
+        "description": "启用 Ascii2D 回退搜索",
+        "type": "bool",
+        "default": true,
+        "hint": "仅在 SauceNAO/trace.moe 没有得到高可信作品链接时调用。"
+      },
+      "ascii2d_session_id": {
+        "description": "Ascii2D _session_id Cookie（可选）",
+        "type": "string",
+        "default": "",
+        "hint": "留空时自动建立会话；遇到 Cloudflare 403 时请填写浏览器中的 _session_id。",
+        "obvious_hint": true
+      },
+      "ascii2d_cf_clearance": {
+        "description": "Ascii2D cf_clearance Cookie（可选）",
+        "type": "string",
+        "default": "",
+        "hint": "Ascii2D 返回 Cloudflare 403 时，从已通过验证的浏览器 Cookie 中获取。",
+        "obvious_hint": true
+      },
       "enable_tracemoe": {"description": "启用 trace.moe", "type": "bool", "default": true},
       "tracemoe_api_key": {"description": "trace.moe API Key（可选）", "type": "string", "default": ""},
       "sauce_high": {"description": "SauceNAO 高可信阈值", "type": "float", "default": 85.0},
@@ -88,6 +108,13 @@
     "items": {
       "proxy_url": {"description": "共用 HTTP(S) 代理 URL", "type": "string", "default": ""},
       "saucenao_proxy_url": {"description": "SauceNAO 单独代理（覆盖共用代理）", "type": "string", "default": ""},
+      "ascii2d_proxy_url": {"description": "Ascii2D 单独代理（覆盖共用代理）", "type": "string", "default": ""},
+      "ascii2d_user_agent": {
+        "description": "Ascii2D 浏览器 User-Agent（可选）",
+        "type": "string",
+        "default": "",
+        "hint": "填写 Cookie 时建议同时填写获取 Cookie 的浏览器 User-Agent；留空使用内置浏览器指纹。"
+      },
       "tracemoe_proxy_url": {"description": "trace.moe 单独代理（覆盖共用代理）", "type": "string", "default": ""}
     }
   },

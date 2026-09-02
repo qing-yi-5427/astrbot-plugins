@@ -12,7 +12,7 @@ from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.cache import ResultCache
 from .core.config import PluginSettings
-from .core.engines import SauceNaoEngine, TraceMoeEngine
+from .core.engines import Ascii2DEngine, SauceNaoEngine, TraceMoeEngine
 from .core.formatter import format_report, preview_url
 from .core.image_resolver import (
     ImageResolutionError,
@@ -27,7 +27,7 @@ from .core.reaction import add_reaction
 from .core.trigger import TriggerMatcher
 
 PLUGIN_NAME = "astrbot_plugin_qing_image_source"
-VERSION = "0.1.7"
+VERSION = "0.2.0"
 
 
 @register(PLUGIN_NAME, "qingyi", "搜索二次元插画与动画截图来源", VERSION)
@@ -67,6 +67,14 @@ class QingImageSourcePlugin(Star):
             hide=self.settings.safety.saucenao_hide,
             proxy=self.settings.network.saucenao_proxy_url or general_proxy,
         )
+        ascii2d = Ascii2DEngine(
+            enabled=self.settings.search.enable_ascii2d,
+            session_id=self.settings.search.ascii2d_session_id,
+            cf_clearance=self.settings.search.ascii2d_cf_clearance,
+            proxy=self.settings.network.ascii2d_proxy_url or general_proxy,
+            user_agent=self.settings.network.ascii2d_user_agent,
+            timeout_seconds=self.settings.search.timeout_seconds,
+        )
         trace = TraceMoeEngine(
             self.session,
             api_key=self.settings.search.tracemoe_api_key,
@@ -80,6 +88,7 @@ class QingImageSourcePlugin(Star):
             trace,
             self.cache,
             max_results=self.settings.search.max_results,
+            ascii2d=ascii2d,
         )
         logger.info("[%s] v%s 初始化完成", PLUGIN_NAME, VERSION)
 
@@ -209,6 +218,12 @@ class QingImageSourcePlugin(Star):
                 f"搜图-qing v{VERSION}",
                 "SauceNAO："
                 + ("已配置" if self.settings.search.saucenao_api_key else "未配置 Key"),
+                "Ascii2D："
+                + (
+                    "已启用（自动回退）"
+                    if self.settings.search.enable_ascii2d
+                    else "已关闭"
+                ),
                 "trace.moe："
                 + ("已启用" if self.settings.search.enable_tracemoe else "已关闭"),
                 f"缓存：{'开启' if cache_stats['enabled'] else '关闭'}，{cache_stats['entries']} 条",
@@ -228,7 +243,7 @@ class QingImageSourcePlugin(Star):
         yield self._plain_result(event, f"已清除 {count} 条搜图缓存。")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("动漫搜图帮助")
+    @filter.command("link帮助")
     async def search_help(self, event: AstrMessageEvent):
         """显示搜图-qing插件帮助。"""
         keywords = (

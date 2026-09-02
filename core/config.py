@@ -52,6 +52,9 @@ class TriggerSettings:
 class SearchSettings:
     enable_saucenao: bool = True
     saucenao_api_key: str = ""
+    enable_ascii2d: bool = True
+    ascii2d_session_id: str = ""
+    ascii2d_cf_clearance: str = ""
     enable_tracemoe: bool = True
     tracemoe_api_key: str = ""
     sauce_high: float = 85.0
@@ -81,6 +84,8 @@ class CacheSettings:
 class NetworkSettings:
     proxy_url: str = ""
     saucenao_proxy_url: str = ""
+    ascii2d_proxy_url: str = ""
+    ascii2d_user_agent: str = ""
     tracemoe_proxy_url: str = ""
 
 
@@ -145,6 +150,11 @@ class PluginSettings:
             search=SearchSettings(
                 enable_saucenao=bool(search.get("enable_saucenao", True)),
                 saucenao_api_key=str(search.get("saucenao_api_key", "")).strip(),
+                enable_ascii2d=bool(search.get("enable_ascii2d", True)),
+                ascii2d_session_id=str(search.get("ascii2d_session_id", "")).strip(),
+                ascii2d_cf_clearance=str(
+                    search.get("ascii2d_cf_clearance", "")
+                ).strip(),
                 enable_tracemoe=bool(search.get("enable_tracemoe", True)),
                 tracemoe_api_key=str(search.get("tracemoe_api_key", "")).strip(),
                 sauce_high=_bounded_float(search.get("sauce_high"), 85.0, 0, 100),
@@ -176,6 +186,8 @@ class PluginSettings:
             network=NetworkSettings(
                 proxy_url=str(network.get("proxy_url", "")).strip(),
                 saucenao_proxy_url=str(network.get("saucenao_proxy_url", "")).strip(),
+                ascii2d_proxy_url=str(network.get("ascii2d_proxy_url", "")).strip(),
+                ascii2d_user_agent=str(network.get("ascii2d_user_agent", "")).strip(),
                 tracemoe_proxy_url=str(network.get("tracemoe_proxy_url", "")).strip(),
             ),
             safety=SafetySettings(

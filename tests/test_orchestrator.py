@@ -1,0 +1,78 @@
+from pathlib import Path
+
+import pytest
+
+from core.cache import ResultCache
+from core.models import Confidence, EngineOutcome, ImagePayload, SearchHit
+from core.orchestrator import SearchOrchestrator
+
+
+class FakeEngine:
+    def __init__(self, name, outcome):
+        self.name = name
+        self.outcome = outcome
+        self.calls = 0
+
+    async def search(self, image):
+        self.calls += 1
+        return self.outcome
+
+
+def image():
+    return ImagePayload(b"image", "a.jpg", "image/jpeg", "abc")
+
+
+@pytest.mark.asyncio
+async def test_high_confidence_illustration_stops_before_trace(tmp_path: Path):
+    sauce = FakeEngine(
+        "SauceNAO",
+        EngineOutcome(
+            "SauceNAO",
+            [
+                SearchHit(
+                    engine="SauceNAO",
+                    kind="illustration",
+                    title="A",
+                    source_url="https://example/a",
+                    similarity=95,
+                    confidence=Confidence.HIGH,
+                )
+            ],
+        ),
+    )
+    trace = FakeEngine("trace.moe", EngineOutcome("trace.moe"))
+    cache = ResultCache(tmp_path / "cache.json", enabled=True, ttl_seconds=60)
+    orchestrator = SearchOrchestrator(sauce, trace, cache, max_results=3)
+    report = await orchestrator.search(image())
+    assert len(report.hits) == 1
+    assert sauce.calls == 1
+    assert trace.calls == 0
+
+    cached = await orchestrator.search(image())
+    assert cached.cache_hit
+    assert sauce.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_anime_sauce_result_also_calls_trace(tmp_path: Path):
+    sauce = FakeEngine(
+        "SauceNAO",
+        EngineOutcome(
+            "SauceNAO",
+            [
+                SearchHit(
+                    engine="SauceNAO",
+                    kind="anime",
+                    title="A",
+                    source_url="https://example/a",
+                    similarity=96,
+                    confidence=Confidence.HIGH,
+                )
+            ],
+        ),
+    )
+    trace = FakeEngine("trace.moe", EngineOutcome("trace.moe"))
+    cache = ResultCache(tmp_path / "cache.json", enabled=False, ttl_seconds=60)
+    orchestrator = SearchOrchestrator(sauce, trace, cache, max_results=3)
+    await orchestrator.search(image())
+    assert trace.calls == 1

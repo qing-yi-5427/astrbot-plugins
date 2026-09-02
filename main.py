@@ -27,7 +27,7 @@ from .core.reaction import add_reaction
 from .core.trigger import TriggerMatcher
 
 PLUGIN_NAME = "astrbot_plugin_qing_image_source"
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 
 
 @register(PLUGIN_NAME, "qingyi", "搜索二次元插画与动画截图来源", VERSION)
@@ -206,7 +206,7 @@ class QingImageSourcePlugin(Star):
         )
         text = "\n".join(
             [
-                f"动漫搜图 v{VERSION}",
+                f"搜图-qing v{VERSION}",
                 "SauceNAO："
                 + ("已配置" if self.settings.search.saucenao_api_key else "未配置 Key"),
                 "trace.moe："
@@ -230,7 +230,7 @@ class QingImageSourcePlugin(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("动漫搜图帮助")
     async def search_help(self, event: AstrMessageEvent):
-        """显示动漫搜图插件帮助。"""
+        """显示搜图-qing插件帮助。"""
         keywords = (
             self.settings.trigger.auto_keywords
             + self.settings.trigger.saucenao_keywords
@@ -238,7 +238,7 @@ class QingImageSourcePlugin(Star):
         )
         yield self._plain_result(
             event,
-            "动漫搜图使用方法：\n"
+            "搜图-qing 使用方法：\n"
             "1. 发送关键词并附带图片；或引用图片后发送关键词。\n"
             "2. 引用图片优先，多图只查询第一张。\n"
             f"3. 当前关键词：{', '.join(dict.fromkeys(keywords))}",

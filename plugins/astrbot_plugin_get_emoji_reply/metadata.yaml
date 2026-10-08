@@ -1,0 +1,9 @@
+name: astrbot_plugin_get_emoji_reply
+display_name: LLOneBot /aa GET 表情回应
+desc: 仅对通过 /aa 进入实际 LLM 请求阶段的 LLOneBot QQ 群消息添加 QQ“OK”表情回应
+author: local
+version: v1.3.0
+support_platforms:
+  - aiocqhttp
+astrbot_version: ">=4.0"
+repo: https://github.com/qing-yi-5427/astrbot_plugin_get_emoji_reply

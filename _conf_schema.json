@@ -1,0 +1,15 @@
+{
+  "max_results": {
+    "description": "Tavily / AnySearch 每次搜索结果上限",
+    "type": "int",
+    "default": 10,
+    "hint": "默认 10 条，可设置 1–20 条。Tavily 最多 20 条，AnySearch 最多 10 条；模型要求更少时按较少的数量返回。",
+    "slider": {"min": 1, "max": 20, "step": 1}
+  },
+  "auto_clear_history": {
+    "description": "自动清理历史搜索结果",
+    "type": "bool",
+    "default": true,
+    "hint": "每次新的 LLM 请求前，把旧的 Tavily / AnySearch 搜索结果和 Tavily 网页提取正文替换为短占位文本；保留对话轮次和工具调用结构。"
+  }
+}

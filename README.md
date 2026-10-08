@@ -164,3 +164,7 @@ LLOneBot 的 `set_msg_emoji_like` 只支持群消息，因此本插件不会尝�
 - [AstrBot 插件开发指南](https://docs.astrbot.app/dev/star/plugin-new.html)
 - [LLOneBot / LuckyLilliaBot](https://github.com/LLOneBot/LuckyLilliaBot)
 - 灵感与接口用法参考：[astrbot_plugin_qq_group_daily_analysis](https://github.com/SXP-Simon/astrbot_plugin_qq_group_daily_analysis)
+
+## 同步记录
+
+2026-10-08：已与 NAS 正在运行的 AstrBot Docker 插件目录核对，插件代码及配置结构一致。

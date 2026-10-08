@@ -1,0 +1,6 @@
+name: astrbot_plugin_memory_recall_fix
+display_name: 记忆召回兼容修复
+author: qingyi
+version: 1.0.0
+description: LivingMemory 最终重排序、有效事实与人物线索一致性修复；保留官方插件更新能力。
+repo: https://github.com/qing-yi-5427/astrbot_plugin_memory_recall_fix

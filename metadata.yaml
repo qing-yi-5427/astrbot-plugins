@@ -1,0 +1,7 @@
+name: astrbot_plugin_context_image_limiter
+display_name: 上下文图片大小限制
+desc: 超过可配置的图片总大小上限时，优先移除最旧图片，保留文字、工具调用和群聊轮数。默认 10 MB。
+version: v1.0.0
+author: qing
+astrbot_version: ">=4.28.0"
+repo: https://github.com/qing-yi-5427/astrbot_plugin_context_image_limiter

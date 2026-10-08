@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Local runtime and credentials
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+*.zip
+backups/

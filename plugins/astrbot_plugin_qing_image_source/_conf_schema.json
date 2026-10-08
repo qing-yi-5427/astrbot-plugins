@@ -1,0 +1,152 @@
+{
+  "trigger": {
+    "description": "触发设置",
+    "type": "object",
+    "items": {
+      "require_at_in_group": {
+        "description": "群聊必须 @机器人",
+        "type": "bool",
+        "default": false
+      },
+      "enable_onebot_reply_fallback": {
+        "description": "引用链缺图时尝试 OneBot get_msg 回退",
+        "type": "bool",
+        "default": true
+      },
+      "match_mode": {
+        "description": "关键词匹配方式",
+        "type": "string",
+        "options": ["contains", "exact"],
+        "default": "contains"
+      },
+      "case_sensitive": {
+        "description": "英文关键词区分大小写",
+        "type": "bool",
+        "default": false
+      },
+      "auto_keywords": {
+        "description": "智能搜索关键词",
+        "type": "list",
+        "default": ["搜图", "找出处", "查来源", "link"]
+      },
+      "saucenao_keywords": {
+        "description": "强制 SauceNAO 关键词",
+        "type": "list",
+        "default": ["sauce", "saucenao"]
+      },
+      "tracemoe_keywords": {
+        "description": "强制 trace.moe 关键词",
+        "type": "list",
+        "default": ["trace", "tracemoe", "搜番"]
+      }
+    }
+  },
+  "search": {
+    "description": "搜索引擎与限流",
+    "type": "object",
+    "items": {
+      "enable_saucenao": {"description": "启用 SauceNAO", "type": "bool", "default": true},
+      "saucenao_api_key": {
+        "description": "SauceNAO API Key",
+        "type": "string",
+        "default": "",
+        "hint": "未配置时跳过 SauceNAO，不会记录或输出密钥。",
+        "obvious_hint": true
+      },
+      "enable_ascii2d": {
+        "description": "启用 Ascii2D 回退搜索",
+        "type": "bool",
+        "default": true,
+        "hint": "仅在 SauceNAO/trace.moe 没有得到高可信作品链接时调用。"
+      },
+      "ascii2d_session_id": {
+        "description": "Ascii2D _session_id Cookie（可选）",
+        "type": "string",
+        "default": "",
+        "hint": "留空时自动建立会话；遇到 Cloudflare 403 时请填写浏览器中的 _session_id。",
+        "obvious_hint": true
+      },
+      "ascii2d_cf_clearance": {
+        "description": "Ascii2D cf_clearance Cookie（可选）",
+        "type": "string",
+        "default": "",
+        "hint": "Ascii2D 返回 Cloudflare 403 时，从已通过验证的浏览器 Cookie 中获取。",
+        "obvious_hint": true
+      },
+      "enable_tracemoe": {"description": "启用 trace.moe", "type": "bool", "default": true},
+      "tracemoe_api_key": {"description": "trace.moe API Key（可选）", "type": "string", "default": ""},
+      "sauce_high": {"description": "SauceNAO 高可信阈值", "type": "float", "default": 85.0},
+      "sauce_possible": {"description": "SauceNAO 可能阈值", "type": "float", "default": 70.0},
+      "trace_high": {"description": "trace.moe 高可信阈值", "type": "float", "default": 90.0},
+      "trace_possible": {"description": "trace.moe 可能阈值", "type": "float", "default": 87.0},
+      "max_results": {"description": "最多返回结果数", "type": "int", "default": 3},
+      "timeout_seconds": {"description": "单次 HTTP 总超时（秒）", "type": "int", "default": 25},
+      "max_concurrency": {"description": "全局最大并发搜索数", "type": "int", "default": 2},
+      "cooldown_seconds": {"description": "用户/会话冷却时间（秒）", "type": "int", "default": 5}
+    }
+  },
+  "reaction": {
+    "description": "QQ/OneBot 表情回应",
+    "type": "object",
+    "items": {
+      "enabled": {"description": "收到有效搜图请求后贴表情", "type": "bool", "default": true},
+      "emoji_id": {"description": "回应表情 ID，128076 为 👌", "type": "int", "default": 128076},
+      "emoji_type": {"description": "回应表情类型（1 系统表情，2 Emoji）", "type": "int", "default": 2}
+    }
+  },
+  "cache": {
+    "description": "结果缓存",
+    "type": "object",
+    "items": {
+      "enabled": {"description": "启用磁盘结果缓存", "type": "bool", "default": true},
+      "ttl_hours": {"description": "缓存有效期（小时）", "type": "int", "default": 12}
+    }
+  },
+  "network": {
+    "description": "网络代理",
+    "type": "object",
+    "items": {
+      "proxy_url": {"description": "共用 HTTP(S) 代理 URL", "type": "string", "default": ""},
+      "saucenao_proxy_url": {"description": "SauceNAO 单独代理（覆盖共用代理）", "type": "string", "default": ""},
+      "ascii2d_proxy_url": {"description": "Ascii2D 单独代理（覆盖共用代理）", "type": "string", "default": ""},
+      "ascii2d_user_agent": {
+        "description": "Ascii2D 浏览器 User-Agent（可选）",
+        "type": "string",
+        "default": "",
+        "hint": "填写 Cookie 时建议同时填写获取 Cookie 的浏览器 User-Agent；留空使用内置浏览器指纹。"
+      },
+      "tracemoe_proxy_url": {"description": "trace.moe 单独代理（覆盖共用代理）", "type": "string", "default": ""}
+    }
+  },
+  "safety": {
+    "description": "图片与内容安全",
+    "type": "object",
+    "items": {
+      "max_image_mb": {"description": "最大图片大小（MiB）", "type": "int", "default": 10},
+      "max_pixels": {"description": "最大总像素数", "type": "int", "default": 40000000},
+      "saucenao_hide": {
+        "description": "SauceNAO 成人内容隐藏级别",
+        "type": "int",
+        "default": 2,
+        "hint": "0 不隐藏；1 隐藏明确成人；2 隐藏明确及疑似成人；3 仅保留预期安全结果。"
+      },
+      "allow_adult_links_in_private": {
+        "description": "允许私聊显示成人结果标题和链接",
+        "type": "bool",
+        "default": false
+      }
+    }
+  },
+  "output": {
+    "description": "输出设置",
+    "type": "object",
+    "items": {
+      "force_text_message": {
+        "description": "始终使用文字消息，不进行文本转图片",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后，本插件的文字无论多长都不会被 AstrBot 全局文转图规则转换成图片。"
+      }
+    }
+  }
+}

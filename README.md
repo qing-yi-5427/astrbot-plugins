@@ -1,5 +1,15 @@
 # astrbot_plugin_qing_image_source
 
+## 仓库安装
+
+在 AstrBot 插件管理中通过仓库地址安装：
+
+```text
+https://github.com/qing-yi-5427/astrbot_plugin_qing_image_source
+```
+
+插件元数据和入口位于仓库根目录；更新可通过 AstrBot 插件管理完成。
+
 AstrBot 4.x 动漫图片来源搜索插件。支持“当前消息图片 + 关键词”和“引用图片 + 关键词”两种方式，使用 SauceNAO 搜索插画原出处、trace.moe 识别动画截图，并以 Ascii2D 作为兜底。
 
 ## 功能

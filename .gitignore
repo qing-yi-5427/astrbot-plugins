@@ -6,3 +6,12 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# Local runtime and credentials
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+*.zip
+backups/

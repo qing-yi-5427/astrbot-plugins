@@ -1,0 +1,8 @@
+{
+  "enabled": {
+    "description": "启用 LivingMemory 召回兼容修复",
+    "type": "bool",
+    "default": true,
+    "hint": "独立运行，不修改官方记忆插件源码。关键接口变化时停用修复并记录日志。"
+  }
+}

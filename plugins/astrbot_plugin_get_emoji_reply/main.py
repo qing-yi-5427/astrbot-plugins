@@ -11,7 +11,7 @@ from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
 
-DEFAULT_EMOJI_IDS = ("124", "76", "201", "428")
+DEFAULT_EMOJI_IDS = ("14", "21", "63", "66", "74", "76", "99", "124", "201", "428")
 
 AA_COMMAND_PATTERN = re.compile(r"^/aa(?:\s|$)")
 

@@ -2,7 +2,7 @@ name: astrbot_plugin_get_emoji_reply
 display_name: LLOneBot /aa 随机表情回应
 desc: 仅对通过 /aa 进入实际 LLM 请求阶段的 LLOneBot QQ 群消息从可配置表情池随机添加一个 QQ 表情回应
 author: local
-version: v1.4.0
+version: v1.4.1
 support_platforms:
   - aiocqhttp
 astrbot_version: ">=4.0"

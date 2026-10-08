@@ -47,6 +47,7 @@ class ReactionTests(unittest.IsolatedAsyncioTestCase):
         obj = plugin.Main(None, {"emoji_id": 201})
         self.assertTrue(obj.random_enabled)
         self.assertEqual(obj.emoji_ids, plugin.DEFAULT_EMOJI_IDS)
+        self.assertEqual(len(set(obj.emoji_ids)), 10)
         self.assertEqual(obj.emoji_id, "201")
 
     def test_pool_normalizes_and_deduplicates(self):

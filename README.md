@@ -15,7 +15,7 @@
 
 ## 安装与更新
 
-1. 登录有权访问本私有仓库的 GitHub 账号，从 [Releases](https://github.com/qing-yi-5427/astrbot-plugins/releases) 下载所需插件的 ZIP。
+1. 从 [Releases](https://github.com/qing-yi-5427/astrbot-plugins/releases) 下载所需插件的 ZIP。
 2. 在 AstrBot 插件管理中选择本地 ZIP 上传，再重载插件。
 3. 更新时重新上传该插件的新 ZIP。已有配置沿用原插件名称；按各插件说明配置。
 

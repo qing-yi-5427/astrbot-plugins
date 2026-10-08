@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest>=8,<10
+pytest-asyncio>=1,<2
+docstring-parser>=0.16,<1
+ruff>=0.12,<1

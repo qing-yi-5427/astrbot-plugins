@@ -1,5 +1,15 @@
 # AstrBot 随机选择插件
 
+## 仓库安装
+
+在 AstrBot 插件管理中通过仓库地址安装：
+
+```text
+https://github.com/qing-yi-5427/astrbot_plugin_roll
+```
+
+插件元数据和入口位于仓库根目录；更新可通过 AstrBot 插件管理完成。
+
 一个简单的 AstrBot 插件，帮助用户在多个选项中快速做出随机选择。
 
 ## 功能特性
@@ -23,7 +33,7 @@
 
 ### 方式二：通过 WebUI 安装
 
-在 AstrBot WebUI 的插件市场中搜索并安装本插件。
+在 AstrBot WebUI 的插件管理中选择通过 Git 仓库安装，填写 `https://github.com/qing-yi-5427/astrbot_plugin_roll`。
 
 ## 使用方法
 

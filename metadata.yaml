@@ -4,3 +4,4 @@ desc: 一个简单的随机选择插件，帮助用户在多个选项中快速�
 version: v1.0.0
 author: Developer
 astrbot_version: ">=4.16.0"
+repo: https://github.com/qing-yi-5427/astrbot_plugin_roll

@@ -38,3 +38,13 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Local runtime and credentials
+.venv/
+.pytest_cache/
+.ruff_cache/
+.env
+.env.*
+!.env.example
+*.zip
+backups/

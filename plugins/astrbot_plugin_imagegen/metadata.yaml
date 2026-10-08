@@ -4,4 +4,3 @@ desc: 调用可配置的 GPT Image 接口，通过 /i 指令或大模型工具�
 version: v1.2.0
 author: qingyi
 astrbot_version: ">=4.28.0"
-repo: https://github.com/qing-yi-5427/astrbot_plugin_imagegen

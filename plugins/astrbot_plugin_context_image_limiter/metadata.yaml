@@ -4,4 +4,3 @@ desc: 超过可配置的图片总大小上限时，优先移除最旧图片，�
 version: v1.0.0
 author: qing
 astrbot_version: ">=4.28.0"
-repo: https://github.com/qing-yi-5427/astrbot_plugin_context_image_limiter

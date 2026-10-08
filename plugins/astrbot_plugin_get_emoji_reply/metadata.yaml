@@ -6,4 +6,3 @@ version: v1.3.0
 support_platforms:
   - aiocqhttp
 astrbot_version: ">=4.0"
-repo: https://github.com/qing-yi-5427/astrbot_plugin_get_emoji_reply

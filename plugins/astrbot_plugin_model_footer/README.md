@@ -1,22 +1,7 @@
+> 本插件已统一维护于 [astrbot-plugins](https://github.com/qing-yi-5427/astrbot-plugins)。请从该仓库 [Releases](https://github.com/qing-yi-5427/astrbot-plugins/releases) 下载本插件 ZIP 后本地上传安装，或复制当前子目录到 `data/plugins/`。多插件仓库不能直接作为单插件 Git 地址安装；更新请重新上传 ZIP。
+
 # 回复模型页脚
 
-## 仓库安装
-
-在 AstrBot 插件管理中通过仓库地址安装：
-
-```text
-https://github.com/qing-yi-5427/astrbot_plugin_model_footer
-```
-
-插件元数据和入口位于仓库根目录；更新可通过 AstrBot 插件管理完成。
-
-适配 AstrBot 4.28.2 和本地 `astrbot-t2i-lite` Typst 服务。
-
-文转图底部显示 `回复模型：模型名称`，优先使用这次最终响应中返回的模型名称。若上游没有返回模型名，使用这次请求实际发送的模型名，自动回退时使用回退模型，而不是全局默认模型。若两者都无法确定，则显示 `未提供模型信息`。
-
-通过事件记录和请求局部 ContextVar 传递 `tmpldata.model_name`，不修改文字正文，不调用额外模型，不修改 AstrBot 核心文件。不同群聊的并发渲染互不影响；普通非模型插件回复不标注聊天模型，保留原页脚。停用插件恢复运行时适配。
-
-代理若自行把模型映射到其他名称而不返回真实模型名，AstrBot 只能展示请求中的名称，无法识别代理内部的隐藏映射。
 
 ## 配套文转图服务
 

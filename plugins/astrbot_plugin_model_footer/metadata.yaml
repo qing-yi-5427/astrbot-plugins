@@ -4,4 +4,3 @@ desc: 给本地文转图服务传递这次回复的模型名，支持自动回�
 version: v1.0.0
 author: qing
 astrbot_version: ">=4.28.2"
-repo: https://github.com/qing-yi-5427/astrbot_plugin_model_footer

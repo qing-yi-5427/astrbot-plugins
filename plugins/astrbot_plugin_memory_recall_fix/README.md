@@ -1,23 +1,7 @@
+> 本插件已统一维护于 [astrbot-plugins](https://github.com/qing-yi-5427/astrbot-plugins)。请从该仓库 [Releases](https://github.com/qing-yi-5427/astrbot-plugins/releases) 下载本插件 ZIP 后本地上传安装，或复制当前子目录到 `data/plugins/`。多插件仓库不能直接作为单插件 Git 地址安装；更新请重新上传 ZIP。
+
 # LivingMemory 召回兼容修复
 
-## 仓库安装
-
-在 AstrBot 插件管理中通过仓库地址安装：
-
-```text
-https://github.com/qing-yi-5427/astrbot_plugin_memory_recall_fix
-```
-
-插件元数据和入口位于仓库根目录；更新可通过 AstrBot 插件管理完成。
-
-独立安装的兼容插件，已针对 AstrBot 4.28.2 / LivingMemory 2.7.0-beta.2 验证。
-不修改 LivingMemory 官方源码、人格提示词、生图插件或聊天历史。
-
-- 文档、关系图和有效记忆原子融合后再进行一次最终重排序，保留明确的检索词命中。
-- 自动注入和主动检索使用同一组有效事实；保留人物/主题的历史提及线索，明确区分别名线索与已确认身份。
-- 将助手的检索状态与事实分开；保留用户纠正和不确定身份的警示，不将“暂时没查到”当作人物资料。
-- Embedding 服务超时或连接错误时最多重试两次；其他存储错误不自动重复写入。
-- 继续使用原插件的会话、人设和访问权限过滤，不增加跨会话检索。
 
 ## 配置
 

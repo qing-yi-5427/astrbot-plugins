@@ -1,21 +1,7 @@
+> 本插件已统一维护于 [astrbot-plugins](https://github.com/qing-yi-5427/astrbot-plugins)。请从该仓库 [Releases](https://github.com/qing-yi-5427/astrbot-plugins/releases) 下载本插件 ZIP 后本地上传安装，或复制当前子目录到 `data/plugins/`。多插件仓库不能直接作为单插件 Git 地址安装；更新请重新上传 ZIP。
+
 # GPT Image 生图插件
 
-## 仓库安装
-
-在 AstrBot 插件管理中通过仓库地址安装：
-
-```text
-https://github.com/qing-yi-5427/astrbot_plugin_imagegen
-```
-
-插件元数据和入口位于仓库根目录；更新可通过 AstrBot 插件管理完成。
-
-为 AstrBot 提供两种入口，生成的真实图片会发送到发起请求的会话：
-
-- **指令**：`/i 一只趴在窗边的橘猫，水彩风格`。也支持 `/imagegen` 和 `/生图`。提示词可包含空格和换行。
-- **自然语言 / LLM 工具**：通过你已有的 `/aa` 对话入口发送“生成一张猫图”。对话模型收到 `astrbot_generate_image` 工具后，自行识别请求、整理提示词并调用；插件完成生图和图片发送，执行结果返回给模型。
-
-生图服务与对话服务相互独立：对话模型负责理解请求和调用工具，GPT Image 模型负责生成图片。
 
 ## 安装
 

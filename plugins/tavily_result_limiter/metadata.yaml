@@ -2,4 +2,3 @@ name: tavily_result_limiter
 desc: Limit Tavily and AnySearch output and clear historical search results
 version: 1.2.0
 author: qingyi
-repo: https://github.com/qing-yi-5427/tavily_result_limiter

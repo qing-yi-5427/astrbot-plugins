@@ -1,16 +1,7 @@
+> 本插件已统一维护于 [astrbot-plugins](https://github.com/qing-yi-5427/astrbot-plugins)。请从该仓库 [Releases](https://github.com/qing-yi-5427/astrbot-plugins/releases) 下载本插件 ZIP 后本地上传安装，或复制当前子目录到 `data/plugins/`。多插件仓库不能直接作为单插件 Git 地址安装；更新请重新上传 ZIP。
+
 # 上下文图片大小限制
 
-## 仓库安装
-
-在 AstrBot 插件管理中通过仓库地址安装：
-
-```text
-https://github.com/qing-yi-5427/astrbot_plugin_context_image_limiter
-```
-
-插件元数据和入口位于仓库根目录；更新可通过 AstrBot 插件管理完成。
-
-适配 AstrBot 4.28.x。只限制模型上下文中的图片，不限制群聊轮数或文字。
 
 ## 设置
 

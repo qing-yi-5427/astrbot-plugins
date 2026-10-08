@@ -1,5 +1,15 @@
 # astrbot_plugin_get_emoji_reply
 
+## 仓库安装
+
+在 AstrBot 插件管理中通过仓库地址安装：
+
+```text
+https://github.com/qing-yi-5427/astrbot_plugin_get_emoji_reply
+```
+
+插件元数据和入口位于仓库根目录；更新可通过 AstrBot 插件管理完成。
+
 面向 **AstrBot + LLOneBot（OneBot 11）** 的 `/aa` LLM 调用表情回应插件。
 
 只有当原始群消息匹配 `/aa` 或以 `/aa ` 开头，并且 AstrBot 已经构建并触发实际 LLM 请求时，插件才会通过 LLOneBot 的 `set_msg_emoji_like` 接口，为原消息添加 QQ 系统表情 `124`（“OK”手势，用于表达 GET）。普通群消息、其他命令以及未进入 LLM 请求阶段的 `/aa` 消息都不会触发。
@@ -80,7 +90,7 @@ astrbot_plugin_get_emoji_reply/
 
 ### 方法三：从 Git 仓库安装
 
-将当前目录发布为 Git 仓库，确保 `metadata.yaml` 位于仓库根目录，然后在 AstrBot 的添加插件界面填写仓库地址。
+在 AstrBot 的添加插件界面填写 `https://github.com/qing-yi-5427/astrbot_plugin_get_emoji_reply`。
 
 ## 配置
 

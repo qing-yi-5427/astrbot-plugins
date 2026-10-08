@@ -120,3 +120,7 @@ MIT License
 ## 反馈与支持
 
 如有问题或建议，欢迎提交 Issue 或 Pull Request。
+
+## 同步记录
+
+2026-10-08：已与 NAS 正在运行的 AstrBot Docker 插件目录核对，插件代码及配置结构一致。

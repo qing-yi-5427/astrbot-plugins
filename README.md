@@ -100,3 +100,7 @@ Ascii2D 回退默认开启。它会自动建立会话；如果提示 Cloudflare 
 ## License
 
 MIT
+
+## 同步记录
+
+2026-10-08：已与 NAS 正在运行的 AstrBot Docker 插件目录核对，插件代码及配置结构一致。

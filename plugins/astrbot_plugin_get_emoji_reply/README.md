@@ -1,6 +1,6 @@
 > 本插件已统一维护于 [astrbot-plugins](https://github.com/qing-yi-5427/astrbot-plugins)。请从该仓库 [Releases](https://github.com/qing-yi-5427/astrbot-plugins/releases) 下载本插件 ZIP 后本地上传安装，或复制当前子目录到 `data/plugins/`。多插件仓库不能直接作为单插件 Git 地址安装；更新请重新上传 ZIP。
 
-# astrbot_plugin_get_emoji_reply
+# LLOneBot /aa 随机表情回应
 
 
 ## 匹配规则
@@ -77,24 +77,21 @@ astrbot_plugin_get_emoji_reply/
 
 然后在 AstrBot WebUI 中重载插件，或重启 AstrBot。
 
-### 方法三：从 Git 仓库安装
+### 从合集获取安装包
 
 从统一仓库 Releases 下载本插件的独立 ZIP，在 AstrBot 中本地上传安装。
 
-## 配置
+## 配置（v1.4.0）
+
+默认开启随机模式，每条符合条件的消息从表情池中等概率选一个表情。不同消息可能随机选到相同表情；同一事件成功回应后不会重复添加。
 
 | 字段 | 默认值 | 说明 |
-|---|---:|---|
-| `emoji_id` | `124` | LLOneBot 使用的 QQ 表情 ID |
+| --- | --- | --- |
+| `random_enabled` | `true` | 关闭后恢复固定表情 |
+| `emoji_ids` | `["124", "76", "201", "428"]` | 随机候选 QQ 表情 ID 列表，可在插件配置中修改 |
+| `emoji_id` | `124` | 固定模式或空池的回退表情，保留旧设置 |
 
-常用值：
-
-- `124`：QQ“OK”手势，默认用于表达 GET
-- `428`：QQ“收到”
-- `76`：QQ“赞”
-- `201`：QQ“点赞”
-
-修改配置后重载插件。
+升级时即使旧配置只有 `emoji_id`，也会启用默认随机池。无效条目会忽略，重复 ID 去重；列表为空、格式错误或没有有效 ID 时回退到固定表情。数字格式有效不代表 QQ 一定支持该表情，如回应失败请从池中移除该 ID。修改配置后重载插件。
 
 ## 工作方式
 
@@ -116,7 +113,7 @@ LLM 请求钩子先终止请求，本插件也不会添加表情。
 await event.bot.call_action(
     "set_msg_emoji_like",
     message_id=message_id,
-    emoji_id="124",
+    emoji_id=chosen_emoji_id,
     set=True,
     self_id=self_id,
 )
@@ -145,7 +142,7 @@ LLOneBot 的 `set_msg_emoji_like` 只支持群消息，因此本插件不会尝�
 4. 确认测试的是群消息，不是私聊。
 5. 使用 `/aa 你好` 测试，不要使用空内容、`/aaa` 或 `/aa_test`。
 6. 查看 AstrBot 插件日志中是否有 `LLOneBot 消息 ... 表情回应失败`。
-7. 尝试把 `emoji_id` 改为 `428` 或 `76`，排除当前 QQ 版本不接受某个表情 ID 的情况。
+7. 如某些表情不被 QQ 接受，从 `emoji_ids` 中移除；或关闭 `random_enabled`，使用固定 `emoji_id=124` 排查。
 
 ## 参考
 
@@ -157,3 +154,7 @@ LLOneBot 的 `set_msg_emoji_like` 只支持群消息，因此本插件不会尝�
 ## 同步记录
 
 2026-10-08：已与 NAS 正在运行的 AstrBot Docker 插件目录核对，插件代码及配置结构一致。
+
+## 更新记录
+
+v1.4.0：加入默认启用的随机表情池，保留 `/aa`、群聊、实际 LLM 请求、重复事件及错误隔离限制。不发送独立聊天消息。

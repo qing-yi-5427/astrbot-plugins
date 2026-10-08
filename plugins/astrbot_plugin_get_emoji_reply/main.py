@@ -1,5 +1,6 @@
-"""为通过 /aa 调用 LLM 的 LLOneBot 群消息添加 QQ“OK”回应。"""
+"""为通过 /aa 调用 LLM 的 LLOneBot 群消息添加 随机 QQ 表情回应。"""
 
+import random
 import re
 from collections.abc import Mapping
 from sys import maxsize
@@ -9,6 +10,8 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
+
+DEFAULT_EMOJI_IDS = ("124", "76", "201", "428")
 
 AA_COMMAND_PATTERN = re.compile(r"^/aa(?:\s|$)")
 
@@ -22,14 +25,35 @@ class Main(Star):
         super().__init__(context)
         self.config = config
         self.emoji_id = self._read_emoji_id()
+        self.random_enabled = self.config.get("random_enabled", True) is True
+        self.emoji_ids = self._read_emoji_ids()
 
     def _read_emoji_id(self) -> str:
         """读取并校验 LLOneBot 使用的 QQ 表情 ID。"""
         value = str(self.config.get("emoji_id", 124)).strip()
-        if value.isdecimal():
+        if value.isascii() and value.isdecimal():
             return value
         logger.warning("emoji_id=%r 无效，回退到 GET/OK 表情 124", value)
         return "124"
+
+    def _read_emoji_ids(self) -> tuple[str, ...]:
+        """Normalize the configurable pool without duplicate weighting."""
+        values = self.config.get("emoji_ids", list(DEFAULT_EMOJI_IDS))
+        if not isinstance(values, (list, tuple)):
+            logger.warning("emoji_ids 必须为列表，回退到固定表情")
+            return (self.emoji_id,)
+        result = []
+        for raw in values:
+            value = str(raw).strip()
+            if not (value.isascii() and value.isdecimal()):
+                continue
+            value = str(int(value))
+            if value not in result:
+                result.append(value)
+        return tuple(result) or (self.emoji_id,)
+
+    def _choose_emoji_id(self) -> str:
+        return random.choice(self.emoji_ids) if self.random_enabled else self.emoji_id
 
     @filter.on_llm_request(priority=-(maxsize + 1))
     async def react_to_llm_request(
@@ -78,7 +102,7 @@ class Main(Star):
 
         params: dict[str, object] = {
             "message_id": message_id,
-            "emoji_id": self.emoji_id,
+            "emoji_id": self._choose_emoji_id(),
             "set": True,
         }
         if self_id:

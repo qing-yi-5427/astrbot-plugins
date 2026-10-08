@@ -1,7 +1,22 @@
 {
+  "random_enabled": {
+    "type": "bool",
+    "description": "随机表情回应；关闭后使用固定 emoji_id",
+    "default": true
+  },
+  "emoji_ids": {
+    "type": "list",
+    "description": "随机表情 ID 池，每项填写一个 QQ 表情数字 ID；忽略无效项并去重，空池回退到固定 emoji_id",
+    "default": [
+      "124",
+      "76",
+      "201",
+      "428"
+    ]
+  },
   "emoji_id": {
     "type": "int",
-    "description": "LLOneBot 的 QQ 表情 ID；默认 124（QQ“OK”，用于表达 GET），QQ“收到”为 428",
+    "description": "固定表情 ID：关闭随机模式或表情池无效时使用；默认 124（OK）",
     "default": 124
   }
 }

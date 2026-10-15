@@ -1,11 +1,12 @@
 # AstrBot 插件集合
 
-统一维护 8 个自用插件，各插件保留独立目录、元数据与原 Git 历史。此仓库不包含第三方插件本体；记忆召回修复插件按其现有 AGPL-3.0 许可保留上游方法来源说明。
+统一维护 9 个自用插件，各插件保留独立目录、元数据与原 Git 历史。此仓库不包含第三方插件本体；记忆召回修复插件按其现有 AGPL-3.0 许可保留上游方法来源说明。
 
 | 插件 | 目录 / 安装包名 |
 | --- | --- |
 | [上下文图片大小限制](plugins/astrbot_plugin_context_image_limiter/README.md) | `astrbot_plugin_context_image_limiter` |
 | [LLM 请求表情回应](plugins/astrbot_plugin_get_emoji_reply/README.md) | `astrbot_plugin_get_emoji_reply` |
+| [QQ 群 @ 唤醒 LLM](plugins/astrbot_plugin_mention_llm/README.md) | `astrbot_plugin_mention_llm` |
 | [GPT Image 生图](plugins/astrbot_plugin_imagegen/README.md) | `astrbot_plugin_imagegen` |
 | [LivingMemory 召回兼容修复](plugins/astrbot_plugin_memory_recall_fix/README.md) | `astrbot_plugin_memory_recall_fix` |
 | [回复模型页脚](plugins/astrbot_plugin_model_footer/README.md) | `astrbot_plugin_model_footer` |
@@ -27,7 +28,7 @@
 python3 scripts/package_plugins.py
 ```
 
-在 `dist/` 生成 8 个独立 ZIP，`metadata.yaml` 和插件入口位于各 ZIP 根目录。打包仅使用 Git 跟踪文件，排除测试、缓存、开发环境和文档辅助目录。
+在 `dist/` 生成 9 个独立 ZIP，`metadata.yaml` 和插件入口位于各 ZIP 根目录。打包仅使用 Git 跟踪文件，排除测试、缓存、开发环境和文档辅助目录。
 
 ## 独立服务
 

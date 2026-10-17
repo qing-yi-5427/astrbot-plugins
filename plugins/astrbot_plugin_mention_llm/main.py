@@ -10,6 +10,8 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import At
 from astrbot.api.star import Context, Star, register
 
+from .mention_parser import MentionParserPatch
+
 NAME = "astrbot_plugin_mention_llm"
 MENTION_REQUEST = "mention_llm_native_request"
 COLLECTOR_MODULE = (
@@ -17,7 +19,7 @@ COLLECTOR_MODULE = (
 )
 
 
-@register(NAME, "qingyi", "仅为明确 @ 机器人的 QQ 群消息放行原生 LLM 前缀检查", "1.0.0")
+@register(NAME, "qingyi", "加速 QQ 群 @ 解析并复用原生 LLM 对话流程", "1.1.0")
 class MentionLLMPlugin(Star):
     """Keep the existing command and conversation pipeline unchanged."""
 
@@ -27,6 +29,7 @@ class MentionLLMPlugin(Star):
         self._module = None
         self._original = None
         self._wrapper = None
+        self._parser_patch = MentionParserPatch(context, NAME)
 
     async def initialize(self):
         """Install one reversible wrapper at the local agent's collection point."""
@@ -66,6 +69,9 @@ class MentionLLMPlugin(Star):
             # every other request, including prebuilt plugin requests.
             return await original(*args, **kwargs)
 
+        # Install before changing the collector, so a compatibility failure
+        # cannot leave a partially installed mention bridge.
+        self._parser_patch.install()
         self._module, self._original, self._wrapper = (
             module,
             original,
@@ -74,7 +80,7 @@ class MentionLLMPlugin(Star):
         self._running = True
         module.collect_initial_request = collect_for_mention
         logger.info(
-            "[mention_llm] Explicit group mention bridge installed; command config unchanged"
+            "[mention_llm] Mention bridge and fast QQ parser installed; command config unchanged"
         )
 
     @filter.on_waiting_llm_request()
@@ -117,6 +123,7 @@ class MentionLLMPlugin(Star):
     async def terminate(self):
         """Restore our alias without removing another plugin's later wrapper."""
         self._running = False
+        self._parser_patch.uninstall()
         if (
             self._module is not None
             and self._module.collect_initial_request is self._wrapper

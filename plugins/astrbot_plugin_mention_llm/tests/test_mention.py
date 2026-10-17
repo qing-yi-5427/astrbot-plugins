@@ -103,10 +103,19 @@ class MentionTests(unittest.IsolatedAsyncioTestCase):
         self.module_patch.start()
         self.addCleanup(self.module_patch.stop)
         spec = importlib.util.spec_from_file_location(
-            "mention_under_test", Path(__file__).parents[1] / "main.py"
+            "mention_under_test",
+            Path(__file__).parents[1] / "main.py",
+            submodule_search_locations=[str(Path(__file__).parents[1])],
         )
         self.module = importlib.util.module_from_spec(spec)
+        package_patch = patch.dict(sys.modules, {spec.name: self.module})
+        package_patch.start()
+        self.addCleanup(package_patch.stop)
         spec.loader.exec_module(self.module)
+        # Parser lifecycle and API behavior have separate focused tests.
+        parser_patch = patch.object(self.module, "MentionParserPatch")
+        self.parser_class = parser_patch.start()
+        self.addCleanup(parser_patch.stop)
         self.import_patch = patch.object(
             self.module.importlib, "import_module", return_value=self.internal
         )
@@ -319,6 +328,16 @@ class MentionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "Unsupported AstrBot"):
             await self.plugin.initialize()
         self.assertIs(self.internal.collect_initial_request, broken)
+
+    async def test_incompatible_parser_keeps_collector_unchanged(self):
+        await self.plugin.terminate()
+        self.plugin._parser_patch.install.side_effect = RuntimeError(
+            "Unsupported parser"
+        )
+        with self.assertRaisesRegex(RuntimeError, "Unsupported parser"):
+            await self.plugin.initialize()
+        self.assertIs(self.internal.collect_initial_request, self.original)
+        self.assertFalse(self.plugin._running)
 
 
 if __name__ == "__main__":

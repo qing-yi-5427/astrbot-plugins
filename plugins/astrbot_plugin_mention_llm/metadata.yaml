@@ -1,6 +1,6 @@
 name: astrbot_plugin_mention_llm
 display_name: QQ 群 @ 唤醒 LLM
-desc: 不更改 /aa 配置，让明确 @ 机器人的 QQ 群消息复用原生 LLM 对话流程。
-version: v1.0.0
+desc: 不更改 /aa 配置，加速 QQ 群 @ 解析，复用原生 LLM 对话流程。
+version: v1.1.0
 author: qingyi
 astrbot_version: ">=4.28.0"

@@ -1,5 +1,6 @@
-"""为通过 /aa 调用 LLM 的 LLOneBot 群消息添加 随机 QQ 表情回应。"""
+"""Add a random QQ reaction to /aa or explicit bot mentions entering the LLM."""
 
+import asyncio
 import random
 import re
 from collections.abc import Mapping
@@ -7,15 +8,14 @@ from sys import maxsize
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.message_components import At
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
 
-
 DEFAULT_EMOJI_IDS = ("14", "21", "63", "66", "74", "76", "99", "124", "201", "428")
+REACTION_TIMEOUT_SECONDS = 1.0
 
 AA_COMMAND_PATTERN = re.compile(r"^/aa(?:\s|$)")
-
-
 
 
 class Main(Star):
@@ -61,14 +61,17 @@ class Main(Star):
         event: AstrMessageEvent,
         _request: ProviderRequest,
     ) -> None:
-        """仅回应由 /aa 触发且已经进入 LLM 请求阶段的群消息。"""
+        """React only to eligible group messages already entering the LLM.
+
+        Args:
+            event: Current QQ group event.
+            _request: Native LLM request; it is never modified by this plugin.
+        """
         if event.get_platform_name() != "aiocqhttp":
             return
 
         message_obj = getattr(event, "message_obj", None)
         original_text = str(getattr(message_obj, "message_str", "") or "").strip()
-        if not AA_COMMAND_PATTERN.match(original_text):
-            return
         if not event.is_at_or_wake_command:
             return
         if event.get_extra("_get_emoji_reply_sent", False):
@@ -93,6 +96,17 @@ class Main(Star):
         sender_id = str(raw_message.get("user_id") or event.get_sender_id() or "")
         if self_id and sender_id == self_id:
             return
+        if not AA_COMMAND_PATTERN.match(original_text):
+            messages = getattr(message_obj, "message", None)
+            if (
+                not self_id
+                or not isinstance(messages, (list, tuple))
+                or not any(
+                    isinstance(part, At) and str(part.qq) == self_id
+                    for part in messages
+                )
+            ):
+                return
 
         bot = getattr(event, "bot", None)
         call_action = getattr(bot, "call_action", None)
@@ -109,10 +123,22 @@ class Main(Star):
             params["self_id"] = self_id
 
         try:
-            await call_action("set_msg_emoji_like", **params)
+            # Supplemental feedback must not hold up the actual model request.
+            await asyncio.wait_for(
+                call_action("set_msg_emoji_like", **params),
+                timeout=REACTION_TIMEOUT_SECONDS,
+            )
             event.set_extra("_get_emoji_reply_sent", True)
+        except asyncio.TimeoutError:
+            logger.debug(
+                "LLOneBot reaction timed out for message %s; continuing LLM", message_id
+            )
         except (TypeError, ValueError) as exc:
             logger.warning("表情回应参数无效，已跳过消息 %s：%s", message_id, exc)
-        except Exception as exc:
-            # 回应是附加动作；接口失败不能中断实际 LLM 请求。
-            logger.debug("LLOneBot 消息 %s 表情回应失败：%s", message_id, exc)
+        except Exception as exc:  # noqa: BLE001
+            # Optional feedback failures must not interrupt the native LLM flow.
+            logger.debug(
+                "LLOneBot reaction failed for message %s (%s)",
+                message_id,
+                type(exc).__name__,
+            )

@@ -11,5 +11,5 @@
   "theme_repository_ref": {"description": "主题分支、标签或 commit", "type": "string", "default": "main"},
   "theme_repository_path": {"description": "仓库内的主题文件夹", "type": "string", "default": "t2i-themes"},
   "theme_sync_on_start": {"description": "插件加载后在后台检查主题更新", "type": "bool", "default": true},
-  "theme_sync_interval_minutes": {"description": "后台检查更新的间隔（分钟，0 为只手动同步）", "type": "int", "default": 30}
+  "theme_sync_interval_minutes": {"description": "后台检查更新的间隔（分钟，0 为关闭定时检查）", "type": "int", "default": 30}
 }

@@ -1,0 +1,38 @@
+{
+  "date": "2026-11-09",
+  "generator": "Codex built-in image_gen",
+  "input_images": [],
+  "processing": "Square PNG resized to 512x512 and encoded to WebP; no compositing or manual retouching",
+  "assets": [
+    {
+      "asset": "genshin/avatar.webp",
+      "prompt": "Create a fresh original Paimon chatbot avatar: chibi anime, fluffy white hair, star accessory, warm peach-and-cream outfit and floating pale-gold halo, mischievous friendly smile, head-and-shoulders, warm beige background, safe circular-crop margins, no text, logos, signature or watermark; no reproduction of an existing official sticker or game screenshot.",
+      "png_sha256": "17f41cf425c4a1a39a19d1fe5dbeb186e7552682f90bdfe64858ab87147e80cd",
+      "webp_sha256": "e0ddf74584b136beb717955a905dd03b3cac121b32d66d156ce5b797e89efcf2"
+    },
+    {
+      "asset": "miku/avatar.webp",
+      "prompt": "Use case: stylized-concept. Asset type: square chatbot avatar for a personal AstrBot theme. Create a fresh original illustration, not a copy of an official artwork, sticker, promotional image, or game screenshot. Polished cute anime/chibi illustration, clean crisp linework, soft cel shading, one character, no text, no lettering, no logos, no signature, no watermark, no border. Center the character, keep head details inside the square with safe margins, face clearly legible at 72–128 pixels. Subject: Hatsune Miku, recognizable long turquoise twin-tails and teal eyes, neat dark headset with small magenta accents, light gray sleeveless top, turquoise necktie. A cheerful clever relaxed smile. Head-and-shoulders portrait with enough upper twin-tails visible to read her silhouette. Simple pale mint solid background, teal and subtle pink accents. A newly drawn fan illustration, friendly and refined.",
+      "png_sha256": "60cc14809709a0fce980c7d17c28f5a02b40e00eeea0df345dffb8b1513696ee",
+      "webp_sha256": "28c20a4b44fa2dacf46a0584df4baa23def5e003310168d02e32854c46926525"
+    },
+    {
+      "asset": "starrail/avatar.webp",
+      "prompt": "Use case: stylized-concept. Asset type: square chatbot avatar for a personal AstrBot theme. Create a fresh original illustration, not a copy of an official artwork, sticker, promotional image, or game screenshot. Polished cute anime/chibi illustration, clean crisp linework, soft cel shading, one character, no text, no lettering, no logos, no signature, no watermark, no border. Center the character, keep head details inside the square with safe margins, face clearly legible at 72–128 pixels. Subject: Pom-Pom, the small rabbit-like train conductor from Honkai Star Rail. Cute furry dark brown and cream rabbit face, enormous floppy rabbit ears, bright blue eyes, a small red conductor cap with gold trim and red-and-gold conductor jacket. Warm slightly serious expression and tiny confident smile. Show head and upper body, include ear shapes within frame. Simple solid dusky indigo background. Newly drawn fan illustration with original pose.",
+      "png_sha256": "6edad47570c74f99f2283329b8d0b446d71428a505b8d62b1d66c8344edd7459",
+      "webp_sha256": "3aff5568183d5e08b5b79d8fb851458ae8fb908649622e8a06fd9ecacc8df2d0"
+    },
+    {
+      "asset": "zzz/avatar.webp",
+      "prompt": "Use case: stylized-concept. Asset type: square chatbot avatar for a personal AstrBot theme. Create a fresh original illustration, not a copy of an official artwork, sticker, promotional image, or game screenshot. Polished cute anime/chibi illustration, clean crisp linework, soft cel shading, one character, no text, no lettering, no logos, no signature, no watermark, no border. Center the character, keep head details inside the square with safe margins, face clearly legible at 72–128 pixels. Subject: Eous (伊埃斯), the distinctive Bangboo from Zenless Zone Zero, not Chef Bangboo or Amillion. Small round robot with a dark black face panel and luminous green oval eyes, white hood with two rabbit-ear antennae and orange inner-ear panels, bright orange scarf, dark little streetwear jacket. Friendly mischievous expression in the green eyes. Three-quarter view, show head and upper body, ears fully inside frame. Simple light lime-yellow background, black/white/orange palette. Newly drawn fan illustration with original pose.",
+      "png_sha256": "0f74af27ee1a7d62ae87d6e6452bc90543a7258e1ed1588bd7f3426edfe399f7",
+      "webp_sha256": "06b0dccbd3a350583588fa9fb5eb20c3eb6f76c13204cab46be231d904dbe6bc"
+    },
+    {
+      "asset": "rio/avatar.webp",
+      "prompt": "Use case: stylized-concept. Asset type: square chatbot avatar for a personal AstrBot theme. Create a fresh original illustration, not a copy of an official artwork, sticker, promotional image, or game screenshot. Polished cute anime/chibi illustration, clean crisp linework, soft cel shading, one character, no text, no lettering, no logos, no signature, no watermark, no border. Center the character, keep head details inside the square with safe margins, face clearly legible at 72–128 pixels. Subject: Tsukatsuki Rio (调月莉音) from Blue Archive, normal school-uniform appearance, not Armed Rio. Adult-looking composed anime woman, long straight black hair with tidy bangs, deep red eyes, subtle dark hair clips, light turtleneck under a charcoal jacket, a small geometric mechanical oval halo above the head with red accents. Calm perceptive expression and very slight knowing smile. Head-and-shoulders portrait with complete halo within frame. Simple pale blue-gray solid background, restrained black/red accents. A newly drawn fan illustration, neat and thoughtful.",
+      "png_sha256": "10dee705984944bcc5e919988ee17ac6cf34876374ba85ec08f3fcdb13b5a475",
+      "webp_sha256": "61ce9b0d12269732f47c4b021473651099309bdb5ad48a082d93f1ff2f9f4b25"
+    }
+  ]
+}

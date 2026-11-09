@@ -1,0 +1,6 @@
+name: astrbot_plugin_t2i_style
+display_name: 文转图主题与模型页脚
+desc: 管理员会话/全局样式、Git主题同步与回退，内置真实回复模型页脚
+version: v1.2.0
+author: qingyi
+astrbot_version: ">=4.28.2"

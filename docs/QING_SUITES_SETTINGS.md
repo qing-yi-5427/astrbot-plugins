@@ -53,4 +53,6 @@ AstrBot 网页端打开 **插件**，找到 **对话管理** 或 **图片与主�
 
 测试使用真实 AstrBot 4.29.4 接口、模拟模型/平台/存储以及 loopback HTTP。执行时设置 `ASTRBOT_ROOT` 到独立测试目录，避免碰到真实数据；安装包排除 `tests/`。生图服务调用和 QQ 群发送的线上验收必须单独授权，普通测试不会发消息或调用付费模型。
 
+在已安装 AstrBot 4.29.4 及测试依赖的 Python 环境中执行 `python scripts/test_qing_suites.py`，脚本自动设置独立数据根并分两轮测试。记忆回归测试需要 LivingMemory 2.7.0-beta.2 源码；默认使用目标 Docker 的安装目录，其他位置通过 `LIVINGMEMORY_SOURCE` 显式指定。仓库直接运行 pytest 默认仅收集新套件的原生入口/迁移测试，不收集保留的历史单插件测试。
+
 对话管理包按 AGPL-3.0 发布并附记忆兼容代码来源；图片与主题包保留搜图模块 MIT 许可和各作者署名。群分析和 LivingMemory 仍走各自的上游更新。

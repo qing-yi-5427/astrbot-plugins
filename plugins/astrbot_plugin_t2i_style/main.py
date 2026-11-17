@@ -18,6 +18,7 @@ from .bridge import StyleBridge
 from .capabilities import ServiceCapabilities, probe_health
 from .core import TEMPLATES, StyleController, StyleStore
 from .models import record_response
+from .report_bridge import ReportBridge
 from .repository import RepositoryError, ThemeRepository
 
 
@@ -29,6 +30,7 @@ class T2IStylePlugin(star.Star):
         self.controller = None
         self.bridge = None
         self.repository_task = None
+        self.report_bridge = None
 
     async def initialize(self):
         if self.bridge is not None and self.bridge.active:
@@ -65,11 +67,51 @@ class T2IStylePlugin(star.Star):
         self.bridge.install(
             ResultDecorateStage, NetworkRenderStrategy, ToolLoopAgentRunner
         )
+        self.report_capabilities = ServiceCapabilities(
+            strategy_getter=lambda: getattr(
+                getattr(self.context, "html_renderer", html_renderer),
+                "network_strategy",
+                None,
+            ),
+            fallback_url=self.config.get("service_url", ""),
+            probe=partial(probe_health, protocol_key="report_style_protocol"),
+        )
+        self.report_bridge = ReportBridge(
+            self.store.render_style,
+            self.repository.bundle,
+            partial(self.report_capabilities.supports, None),
+            self._report_endpoint,
+        )
+        self._attach_report_bridge()
         self.logger.info(
             "T2I styles and per-reply model footer ready; protocol capability required for styles"
         )
         if self.repository.enabled:
             self.repository_task = asyncio.create_task(self._repository_loop())
+
+    def _report_endpoint(self, session):
+        config = self.context.get_config(session)
+        return (config.get("t2i_endpoint") or None) if config is not None else None
+
+    def _attach_report_bridge(self):
+        getter = getattr(self.context, "get_registered_star", None)
+        if (
+            self.report_bridge is not None
+            and getter is not None
+            and self.report_bridge.attach(
+                getter("astrbot_plugin_qq_group_daily_analysis")
+            )
+        ):
+            self.logger.info("Group reports now follow conversation T2I themes")
+
+    @filter.on_plugin_loaded()
+    async def report_plugin_loaded(self, metadata):
+        if self.report_bridge is not None and self.report_bridge.attach(metadata):
+            self.logger.info("Group report theme bridge attached after plugin load")
+
+    @filter.on_astrbot_loaded()
+    async def report_startup_ready(self):
+        self._attach_report_bridge()
 
     async def _validate_theme(self, bundle):
         """Try the theme on every configured default renderer before enabling it."""
@@ -161,6 +203,8 @@ class T2IStylePlugin(star.Star):
             record_response(event, response)
 
     async def terminate(self):
+        if self.report_bridge is not None:
+            self.report_bridge.uninstall()
         if self.repository_task is not None:
             self.repository_task.cancel()
             await asyncio.gather(self.repository_task, return_exceptions=True)

@@ -1,0 +1,175 @@
+from ...runtime import FeatureService
+
+"""Allow explicit QQ bot mentions through the native LLM prefix gate."""
+
+import importlib
+import inspect
+from dataclasses import replace
+from functools import wraps
+
+from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent
+from astrbot.api.message_components import At
+from astrbot.api.star import Context
+
+from .mention_parser import MentionParserPatch
+
+NAME = "astrbot_plugin_qing_chat"
+MENTION_REQUEST = "mention_llm_native_request"
+COLLECTOR_MODULE = (
+    "astrbot.core.pipeline.process_stage.method.agent_sub_stages.internal"
+)
+
+
+class MentionLLMPlugin(FeatureService):
+    """Keep the existing command and conversation pipeline unchanged."""
+
+    def __init__(self, context: Context):
+        super().__init__(context)
+        self._running = False
+        self._module = None
+        self._original = None
+        self._wrapper = None
+        self._prefix_patches = []
+        self._parser_patch = MentionParserPatch(context, NAME, self.is_session_enabled)
+
+    async def initialize(self):
+        """Install one reversible wrapper at the local agent's collection point."""
+        if self._running:
+            return
+        module = importlib.import_module(COLLECTOR_MODULE)
+        if not hasattr(module, "collect_initial_request"):
+            # 4.29 moved collection into astr_main_agent and checks the prefix
+            # before collection as well. Patch both call sites, scoped to the
+            # explicitly marked event, without modifying its message or config.
+            main_agent = importlib.import_module("astrbot.core.astr_main_agent")
+            targets = (module, main_agent)
+            patches = []
+            for target in targets:
+                original_match = target._matches_provider_wake_prefix
+                if tuple(inspect.signature(original_match).parameters) != (
+                    "event",
+                    "provider_wake_prefix",
+                ) or inspect.iscoroutinefunction(original_match):
+                    raise RuntimeError("Unsupported AstrBot prefix matcher")
+
+                def wrap_match(original_match):
+                    @wraps(original_match)
+                    def matches(event, provider_wake_prefix):
+                        if (
+                            self._running
+                            and event.get_extra(MENTION_REQUEST) is True
+                            and event.get_extra("provider_request") is None
+                        ):
+                            return True
+                        return original_match(event, provider_wake_prefix)
+
+                    return matches
+
+                patches.append((target, original_match, wrap_match(original_match)))
+            self._parser_patch.install()
+            self._prefix_patches = patches
+            self._running = True
+            for target, _, wrapper in patches:
+                target._matches_provider_wake_prefix = wrapper
+            logger.info(
+                "[mention_llm] Mention bridge and fast QQ parser installed (4.29 prefix matcher)"
+            )
+            return
+        original = module.collect_initial_request
+        signature = inspect.signature(original)
+        if not inspect.iscoroutinefunction(original) or tuple(signature.parameters) != (
+            "event",
+            "plugin_context",
+            "config",
+            "req",
+        ):
+            raise RuntimeError(
+                "Unsupported AstrBot request collector; mention bridge not installed."
+            )
+
+        @wraps(original)
+        async def collect_for_mention(*args, **kwargs):
+            bound = signature.bind(*args, **kwargs)
+            event = bound.arguments["event"]
+            config = bound.arguments["config"]
+            if (
+                self._running
+                and event.get_extra(MENTION_REQUEST) is True
+                and bound.arguments.get("req") is None
+                and event.get_extra("provider_request") is None
+                and config.provider_wake_prefix
+                and not event.message_str.startswith(config.provider_wake_prefix)
+            ):
+                # Copy only this call's build config. The original collector still
+                # runs inside AstrBot's session lock and handles all attachments.
+                bound.arguments["config"] = replace(config, provider_wake_prefix="")
+                return await original(*bound.args, **bound.kwargs)
+            # Preserve argument shape, object identity and behavior for /aa and
+            # every other request, including prebuilt plugin requests.
+            return await original(*args, **kwargs)
+
+        # Install before changing the collector, so a compatibility failure
+        # cannot leave a partially installed mention bridge.
+        self._parser_patch.install()
+        self._module, self._original, self._wrapper = (
+            module,
+            original,
+            collect_for_mention,
+        )
+        self._running = True
+        module.collect_initial_request = collect_for_mention
+        logger.info(
+            "[mention_llm] Mention bridge and fast QQ parser installed; command config unchanged"
+        )
+
+    async def mark_explicit_mention(self, event: AstrMessageEvent):
+        """Mark only mentions that already passed AstrBot's LLM entry checks.
+
+        Args:
+            event: Current QQ group event after command/session permission checks.
+        """
+        if (
+            not self._running
+            or event.get_platform_name() != "aiocqhttp"
+            or not event.get_group_id()
+            or not event.is_at_or_wake_command
+            or event.is_stopped()
+            or event.get_extra("provider_request") is not None
+        ):
+            return
+        self_id = str(event.get_self_id())
+        if not self_id or str(event.get_sender_id()) == self_id:
+            return
+        enabled_plugins = getattr(event, "plugins_name", None)
+        if enabled_plugins is not None and NAME not in enabled_plugins:
+            return
+        # Inspect only top-level structured mentions, never quoted messages,
+        # displayed nicknames, @all, or text that merely contains an @ sign.
+        if not any(
+            isinstance(part, At) and str(part.qq) == self_id
+            for part in event.get_messages()
+        ):
+            return
+        # Non-message hooks are not session-filtered in AstrBot 4.28.2.
+        from astrbot.core.star.session_plugin_manager import SessionPluginManager
+
+        if await SessionPluginManager.is_plugin_enabled_for_session(
+            event.unified_msg_origin, NAME
+        ):
+            event.set_extra(MENTION_REQUEST, True)
+
+    async def terminate(self):
+        """Restore our alias without removing another plugin's later wrapper."""
+        self._running = False
+        self._parser_patch.uninstall()
+        for module, original, wrapper in self._prefix_patches:
+            if module._matches_provider_wake_prefix is wrapper:
+                module._matches_provider_wake_prefix = original
+        self._prefix_patches = []
+        if (
+            self._module is not None
+            and self._module.collect_initial_request is self._wrapper
+        ):
+            self._module.collect_initial_request = self._original
+        logger.info("[mention_llm] Mention bridge disabled")

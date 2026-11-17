@@ -1,0 +1,208 @@
+{
+  "mention": {
+    "description": "@ 唤醒",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用此功能模块",
+        "type": "bool",
+        "default": true
+      }
+    }
+  },
+  "reaction": {
+    "description": "随机表情回应",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用此功能模块",
+        "type": "bool",
+        "default": true
+      },
+      "random_enabled": {
+        "type": "bool",
+        "description": "随机表情回应；关闭后使用固定 emoji_id",
+        "default": true
+      },
+      "emoji_ids": {
+        "type": "list",
+        "description": "随机表情 ID 池，每项填写一个 QQ 表情数字 ID；忽略无效项并去重，空池回退到固定 emoji_id",
+        "default": [
+          "14",
+          "21",
+          "63",
+          "66",
+          "74",
+          "76",
+          "99",
+          "124",
+          "201",
+          "428"
+        ]
+      },
+      "emoji_id": {
+        "type": "int",
+        "description": "固定表情 ID：关闭随机模式或表情池无效时使用；默认 124（OK）",
+        "default": 124
+      }
+    }
+  },
+  "conversation": {
+    "description": "搜索/历史精简、分级预算、排队与闲置新会话",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用此功能模块",
+        "type": "bool",
+        "default": true
+      },
+      "max_results": {
+        "description": "Tavily / AnySearch 每次搜索结果上限",
+        "type": "int",
+        "default": 10,
+        "hint": "默认 10 条，可设置 1–20 条。Tavily 最多 20 条，AnySearch 最多 10 条；模型要求更少时按较少的数量返回。",
+        "slider": {
+          "min": 1,
+          "max": 20,
+          "step": 1
+        }
+      },
+      "compact_tool_history": {
+        "description": "精简较早的执行工具结果",
+        "type": "bool",
+        "default": true,
+        "hint": "不调用模型生成摘要，只将白名单工具的旧长输出替换为带状态和首尾节选的记录；保留聊天、图片、工具调用 ID，默认不处理记忆召回与生图结果。"
+      },
+      "keep_recent_tool_results": {
+        "description": "保留完整的最近执行工具结果数",
+        "type": "int",
+        "default": 8,
+        "slider": {
+          "min": 0,
+          "max": 100,
+          "step": 1
+        },
+        "hint": "只计算精简白名单内的工具结果。不是群聊轮数上限，不删除用户或机器人聊天。"
+      },
+      "old_tool_result_chars": {
+        "description": "旧执行工具结果精简后字符上限",
+        "type": "int",
+        "default": 1200,
+        "slider": {
+          "min": 500,
+          "max": 10000,
+          "step": 100
+        },
+        "hint": "较短结果保持原样；精简结果明确标注原长度和省略内容，不应当作完整输出。"
+      },
+      "compact_tool_names": {
+        "description": "历史执行结果精简白名单",
+        "type": "list",
+        "default": [
+          "astrbot_execute_shell",
+          "astrbot_shell_session",
+          "astrbot_file_read_tool",
+          "astrbot_execute_python"
+        ],
+        "hint": "默认只处理命令、命令会话、文件读取与 Python 输出。生图和核心记忆召回结果受保护，不受此白名单影响。"
+      },
+      "enable_chat_budget": {
+        "description": "启用聊天与工具任务总处理预算",
+        "type": "bool",
+        "default": true,
+        "hint": "进入本地 Agent 后才计时，不计同群排队。普通聊天默认 180 秒；开始调用普通工具后改用工具任务预算，仍从本轮原始开始时间累计，不因连续调用重置。生图沿用独立预算，不修改 SDK 重试、模型切换或图片限制。"
+      },
+      "chat_budget_seconds": {
+        "description": "普通聊天总处理预算（秒）",
+        "type": "int",
+        "default": 180,
+        "slider": {
+          "min": 30,
+          "max": 900,
+          "step": 10
+        },
+        "hint": "未调用普通工具时默认 180 秒。超时报告不额外调用模型；QQ 发送故障仍可能导致通知无法送达。只对启用此插件的新本地 Agent 请求生效。"
+      },
+      "tool_budget_seconds": {
+        "description": "工具任务总处理预算（秒）",
+        "type": "int",
+        "default": 600,
+        "slider": {
+          "min": 60,
+          "max": 1800,
+          "step": 10
+        },
+        "hint": "默认 600 秒；第一次普通工具调用时启用，仍从该轮 Agent 原始开始时间累计，后续工具调用不重置。包括模型决策和工具等待，不修改单个工具自己的超时。实际预算不会短于普通聊天预算。"
+      },
+      "queue_new_requests": {
+        "description": "新唤醒请求独立排队",
+        "type": "bool",
+        "default": true,
+        "hint": "启用聊天预算时，新的 /aa 或 @ 唤醒请求按原生会话锁排队，避免同一用户的新问题被并入旧 Agent、共享将到期的预算。普通群聊消息的唤醒规则保持不变；关闭后恢复 AstrBot 原生追问合并。"
+      },
+      "enable_idle_new_conversation": {
+        "description": "群聊长时间未发言后自动新建会话",
+        "type": "bool",
+        "default": true,
+        "hint": "适用于 QQ OneBot 群聊。机器人超过设定时长没有成功发言后，在下一次唤醒请求轮到处理时新建当前会话，保留旧记录、人格和长期记忆。按平台返回消息 ID 的发送计时，失败发送及贴表情不计入；不在后台主动发群消息。首次启用从启用时开始观察。"
+      },
+      "idle_new_conversation_hours": {
+        "description": "机器人群聊未发言时长（小时）",
+        "type": "int",
+        "default": 8,
+        "slider": {
+          "min": 1,
+          "max": 168,
+          "step": 1
+        },
+        "hint": "默认 8 小时，按群独立判断。新建时也去掉积攒到当前消息之前的群聊背景，保留当前消息、直接引用、图片和本轮记忆召回。发送成功时间与上次新建时间持久保存；一次新建后不会在发送失败时连续创建空会话。"
+      },
+      "auto_clear_history": {
+        "description": "自动清理历史搜索结果",
+        "type": "bool",
+        "default": true,
+        "hint": "每次新的 LLM 请求前，把旧的 Tavily / AnySearch 搜索结果和 Tavily 网页提取正文替换为短占位文本；保留对话轮次和工具调用结构。"
+      }
+    }
+  },
+  "context_images": {
+    "description": "上下文图片预算",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用此功能模块",
+        "type": "bool",
+        "default": true
+      },
+      "max_total_image_mb": {
+        "description": "上下文图片总大小上限（MB）",
+        "type": "float",
+        "default": 10.0,
+        "hint": "必须大于 0，支持小数。默认 10 MB（1 MB = 1,000,000 字节），按发送的图片字符串（含 Base64）统计。超限时优先移除最旧图片，保留文字、工具调用和聊天轮数；必要时也会移除超大的最新图片。远程 URL 只统计 URL 文本，不额外下载图片。保存后生效，已开始的模型请求不会被取消。"
+      }
+    }
+  },
+  "memory_compat": {
+    "description": "LivingMemory 兼容修复",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用 LivingMemory 召回兼容修复",
+        "type": "bool",
+        "default": true,
+        "hint": "独立运行，不修改官方记忆插件源码。关键接口变化时停用修复并记录日志。"
+      }
+    }
+  },
+  "roll": {
+    "description": "随机选择",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用此功能模块",
+        "type": "bool",
+        "default": true
+      }
+    }
+  }
+}

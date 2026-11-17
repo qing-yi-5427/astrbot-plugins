@@ -1,5 +1,6 @@
 """Package tracked plugin files as installable, root-level ZIP archives."""
 from pathlib import Path
+import argparse
 import subprocess
 import zipfile
 
@@ -7,8 +8,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SKIP = {"tests", ".grill", ".github", "__pycache__"}
 output = ROOT / "dist"
 output.mkdir(exist_ok=True)
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--legacy", action="store_true", help="Include historical standalone plugins as well")
+args = parser.parse_args()
+CURRENT = {"astrbot_plugin_qing_chat", "astrbot_plugin_qing_media"}
 for plugin in sorted((ROOT / "plugins").iterdir()):
     if not (plugin / "metadata.yaml").is_file():
+        continue
+    if not args.legacy and plugin.name not in CURRENT:
         continue
     tracked = subprocess.check_output(
         ["git", "ls-files", "-z", "--", str(plugin.relative_to(ROOT))], cwd=ROOT

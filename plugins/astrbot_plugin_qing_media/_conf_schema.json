@@ -1,0 +1,484 @@
+{
+  "imagegen": {
+    "description": "生图/GIF/工具调用/回执确认",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用此功能模块",
+        "type": "bool",
+        "default": true
+      },
+      "base_url": {
+        "description": "生图 API 地址",
+        "type": "string",
+        "default": "https://api.openai.com/v1",
+        "hint": "填写带 API 前缀的地址（通常包含 /v1），例如 https://example.com/v1；也可直接填写完整 /images/generations 地址。"
+      },
+      "images_path": {
+        "description": "生图接口路径",
+        "type": "string",
+        "default": "/images/generations",
+        "hint": "相对于 base_url 的接口路径；通常保持默认。"
+      },
+      "api_key": {
+        "description": "生图 API Key",
+        "type": "string",
+        "secret": true,
+        "default": "",
+        "hint": "独立于 AstrBot 对话模型的 Key。留空时读取 OPENAI_API_KEY；两者都为空时不发送鉴权头，适用于免鉴权的自建接口。"
+      },
+      "model": {
+        "description": "生图模型名",
+        "type": "string",
+        "default": "gpt-image-2",
+        "hint": "填写服务实际支持的 GPT Image 模型名或映射名；支持 gpt-image-1、gpt-image-1-mini、gpt-image-1.5、gpt-image-2 等。"
+      },
+      "size": {
+        "description": "图片尺寸",
+        "type": "string",
+        "default": "auto",
+        "hint": "auto、1024x1024、1536x1024、1024x1536 等。自定义尺寸是否可用取决于模型和服务。"
+      },
+      "quality": {
+        "description": "图片质量",
+        "type": "string",
+        "default": "auto",
+        "options": [
+          "auto",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "hint": "xhigh 和 max 仅适用于支持它们的模型；早期 GPT Image 模型请使用 auto、low、medium 或 high。"
+      },
+      "output_format": {
+        "description": "图片格式",
+        "type": "string",
+        "default": "png",
+        "options": [
+          "png",
+          "jpeg",
+          "webp",
+          "gif"
+        ],
+        "hint": "默认保持 png。gif 需模型和服务支持；/i --gif 或自然语言明确要求 GIF 时可仅对本次请求选择 GIF。接口返回的 GIF 原样发送，保留动画帧。"
+      },
+      "background": {
+        "description": "图片背景",
+        "type": "string",
+        "default": "auto",
+        "options": [
+          "auto",
+          "opaque",
+          "transparent"
+        ],
+        "hint": "透明背景需要模型支持，并使用 png 或 webp 格式。"
+      },
+      "n": {
+        "description": "每次生成的图片数量",
+        "type": "int",
+        "default": 1,
+        "slider": {
+          "min": 1,
+          "max": 10,
+          "step": 1
+        },
+        "hint": "1–10；实际可用数量取决于服务。指令和模型工具都使用此设置。"
+      },
+      "timeout": {
+        "description": "生图及下载总超时（秒）",
+        "type": "int",
+        "default": 300,
+        "hint": "1–1800 秒。超时不会自动重试，避免服务已生成图片时重复计费。"
+      },
+      "proxy": {
+        "description": "HTTP(S) 代理",
+        "type": "string",
+        "default": "",
+        "hint": "例如 http://127.0.0.1:7890；留空时遵循 HTTP_PROXY、HTTPS_PROXY 和 NO_PROXY。"
+      },
+      "max_image_mb": {
+        "description": "单张图片大小上限（MiB）",
+        "type": "int",
+        "default": 20,
+        "hint": "1–100；同时限制接口响应与下载大小，避免异常响应占用过多内存。"
+      },
+      "max_concurrent": {
+        "description": "最大同时生图任务数",
+        "type": "int",
+        "default": 2,
+        "hint": "1–10；同一会话同时只允许一个任务。修改后重载插件生效。"
+      },
+      "show_progress": {
+        "description": "发送正在生成的提示",
+        "type": "bool",
+        "default": true
+      },
+      "ensure_tool_call": {
+        "description": "校验明确生图请求的工具调用",
+        "type": "bool",
+        "default": true,
+        "hint": "仅对明确生图请求生效。模型没有调用就结束时，最多补一次对话请求，由模型整理 prompt 并调用生图工具；拒绝、澄清、已调用失败不补。普通聊天不受影响。漏调用时会增加一次对话请求的耗时和 Token。"
+      },
+      "tool_call_repair_timeout": {
+        "description": "生图漏调用纠偏超时（秒）",
+        "type": "int",
+        "default": 180,
+        "slider": {
+          "min": 1,
+          "max": 180,
+          "step": 1
+        },
+        "hint": "只限制额外的对话模型纠偏请求，不改变生图 API 的 timeout。超时会明确说明未执行，不再循环补调用。"
+      },
+      "inject_tool_hint": {
+        "description": "仅在明确生图请求中提示工具使用方式",
+        "type": "bool",
+        "default": true,
+        "hint": "仅当当前消息明确要求生图、工具可用时追加提示。普通聊天不注入；遵守人格工具白名单。"
+      }
+    }
+  },
+  "render": {
+    "description": "文转图主题、Git 同步、模型页脚与主题群报告",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用此功能模块",
+        "type": "bool",
+        "default": true
+      },
+      "theme": {
+        "description": "全局默认主题 ID（内置或 Git 主题，/t2i list 查看）",
+        "type": "string",
+        "default": "codex"
+      },
+      "brand_name": {
+        "description": "全局自定义品牌名（最多64字）；留空继承各主题默认名称",
+        "type": "string",
+        "default": ""
+      },
+      "subtitle": {
+        "description": "全局自定义副标题（最多96字）；留空继承各主题默认文案",
+        "type": "string",
+        "default": ""
+      },
+      "avatar_path": {
+        "description": "可选的本机自定义头像路径；留空使用主题头像；PNG/JPEG/WebP，最大512000字节，最大1024×1024，不支持URL",
+        "type": "string",
+        "default": ""
+      },
+      "show_avatar": {
+        "description": "默认显示头像",
+        "type": "bool",
+        "default": true
+      },
+      "show_footer": {
+        "description": "默认显示真实回复模型页脚",
+        "type": "bool",
+        "default": true
+      },
+      "service_url": {
+        "description": "可选服务地址回退值（如 http://t2i-lite:8000/text2img）；优先探测AstrBot实际网络策略地址，不会修改全局文转图配置",
+        "type": "string",
+        "default": ""
+      },
+      "repository_enabled": {
+        "description": "启用 Git 主题同步（需 T2I 2.1.0+）",
+        "type": "bool",
+        "default": false
+      },
+      "theme_repository": {
+        "description": "公开 GitHub 主题仓库（owner/repo 或 HTTPS 仓库地址）",
+        "type": "string",
+        "default": "qing-yi-5427/astrbot-plugins"
+      },
+      "theme_repository_ref": {
+        "description": "主题分支、标签或 commit",
+        "type": "string",
+        "default": "main"
+      },
+      "theme_repository_path": {
+        "description": "仓库内的主题文件夹",
+        "type": "string",
+        "default": "t2i-themes"
+      },
+      "theme_sync_on_start": {
+        "description": "插件加载后在后台检查主题更新",
+        "type": "bool",
+        "default": true
+      },
+      "theme_sync_interval_minutes": {
+        "description": "后台检查更新的间隔（分钟，0 为关闭定时检查）",
+        "type": "int",
+        "default": 30
+      }
+    }
+  },
+  "image_source": {
+    "description": "图片来源搜索",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用此功能模块",
+        "type": "bool",
+        "default": true
+      },
+      "trigger": {
+        "description": "触发设置",
+        "type": "object",
+        "items": {
+          "require_at_in_group": {
+            "description": "群聊必须 @机器人",
+            "type": "bool",
+            "default": false
+          },
+          "enable_onebot_reply_fallback": {
+            "description": "引用链缺图时尝试 OneBot get_msg 回退",
+            "type": "bool",
+            "default": true
+          },
+          "match_mode": {
+            "description": "关键词匹配方式",
+            "type": "string",
+            "options": [
+              "contains",
+              "exact"
+            ],
+            "default": "contains"
+          },
+          "case_sensitive": {
+            "description": "英文关键词区分大小写",
+            "type": "bool",
+            "default": false
+          },
+          "auto_keywords": {
+            "description": "智能搜索关键词",
+            "type": "list",
+            "default": [
+              "搜图",
+              "找出处",
+              "查来源",
+              "link"
+            ]
+          },
+          "saucenao_keywords": {
+            "description": "强制 SauceNAO 关键词",
+            "type": "list",
+            "default": [
+              "sauce",
+              "saucenao"
+            ]
+          },
+          "tracemoe_keywords": {
+            "description": "强制 trace.moe 关键词",
+            "type": "list",
+            "default": [
+              "trace",
+              "tracemoe",
+              "搜番"
+            ]
+          }
+        }
+      },
+      "search": {
+        "description": "搜索引擎与限流",
+        "type": "object",
+        "items": {
+          "enable_saucenao": {
+            "description": "启用 SauceNAO",
+            "type": "bool",
+            "default": true
+          },
+          "saucenao_api_key": {
+            "description": "SauceNAO API Key",
+            "type": "string",
+            "default": "",
+            "hint": "未配置时跳过 SauceNAO，不会记录或输出密钥。",
+            "obvious_hint": true
+          },
+          "enable_ascii2d": {
+            "description": "启用 Ascii2D 回退搜索",
+            "type": "bool",
+            "default": true,
+            "hint": "仅在 SauceNAO/trace.moe 没有得到高可信作品链接时调用。"
+          },
+          "ascii2d_session_id": {
+            "description": "Ascii2D _session_id Cookie（可选）",
+            "type": "string",
+            "default": "",
+            "hint": "留空时自动建立会话；遇到 Cloudflare 403 时请填写浏览器中的 _session_id。",
+            "obvious_hint": true
+          },
+          "ascii2d_cf_clearance": {
+            "description": "Ascii2D cf_clearance Cookie（可选）",
+            "type": "string",
+            "default": "",
+            "hint": "Ascii2D 返回 Cloudflare 403 时，从已通过验证的浏览器 Cookie 中获取。",
+            "obvious_hint": true
+          },
+          "enable_tracemoe": {
+            "description": "启用 trace.moe",
+            "type": "bool",
+            "default": true
+          },
+          "tracemoe_api_key": {
+            "description": "trace.moe API Key（可选）",
+            "type": "string",
+            "default": ""
+          },
+          "sauce_high": {
+            "description": "SauceNAO 高可信阈值",
+            "type": "float",
+            "default": 85.0
+          },
+          "sauce_possible": {
+            "description": "SauceNAO 可能阈值",
+            "type": "float",
+            "default": 70.0
+          },
+          "trace_high": {
+            "description": "trace.moe 高可信阈值",
+            "type": "float",
+            "default": 90.0
+          },
+          "trace_possible": {
+            "description": "trace.moe 可能阈值",
+            "type": "float",
+            "default": 87.0
+          },
+          "max_results": {
+            "description": "最多返回结果数",
+            "type": "int",
+            "default": 3
+          },
+          "timeout_seconds": {
+            "description": "单次 HTTP 总超时（秒）",
+            "type": "int",
+            "default": 25
+          },
+          "max_concurrency": {
+            "description": "全局最大并发搜索数",
+            "type": "int",
+            "default": 2
+          },
+          "cooldown_seconds": {
+            "description": "用户/会话冷却时间（秒）",
+            "type": "int",
+            "default": 5
+          }
+        }
+      },
+      "reaction": {
+        "description": "QQ/OneBot 表情回应",
+        "type": "object",
+        "items": {
+          "enabled": {
+            "description": "收到有效搜图请求后贴表情",
+            "type": "bool",
+            "default": true
+          },
+          "emoji_id": {
+            "description": "回应表情 ID，128076 为 👌",
+            "type": "int",
+            "default": 128076
+          },
+          "emoji_type": {
+            "description": "回应表情类型（1 系统表情，2 Emoji）",
+            "type": "int",
+            "default": 2
+          }
+        }
+      },
+      "cache": {
+        "description": "结果缓存",
+        "type": "object",
+        "items": {
+          "enabled": {
+            "description": "启用磁盘结果缓存",
+            "type": "bool",
+            "default": true
+          },
+          "ttl_hours": {
+            "description": "缓存有效期（小时）",
+            "type": "int",
+            "default": 12
+          }
+        }
+      },
+      "network": {
+        "description": "网络代理",
+        "type": "object",
+        "items": {
+          "proxy_url": {
+            "description": "共用 HTTP(S) 代理 URL",
+            "type": "string",
+            "default": ""
+          },
+          "saucenao_proxy_url": {
+            "description": "SauceNAO 单独代理（覆盖共用代理）",
+            "type": "string",
+            "default": ""
+          },
+          "ascii2d_proxy_url": {
+            "description": "Ascii2D 单独代理（覆盖共用代理）",
+            "type": "string",
+            "default": ""
+          },
+          "ascii2d_user_agent": {
+            "description": "Ascii2D 浏览器 User-Agent（可选）",
+            "type": "string",
+            "default": "",
+            "hint": "填写 Cookie 时建议同时填写获取 Cookie 的浏览器 User-Agent；留空使用内置浏览器指纹。"
+          },
+          "tracemoe_proxy_url": {
+            "description": "trace.moe 单独代理（覆盖共用代理）",
+            "type": "string",
+            "default": ""
+          }
+        }
+      },
+      "safety": {
+        "description": "图片与内容安全",
+        "type": "object",
+        "items": {
+          "max_image_mb": {
+            "description": "最大图片大小（MiB）",
+            "type": "int",
+            "default": 10
+          },
+          "max_pixels": {
+            "description": "最大总像素数",
+            "type": "int",
+            "default": 40000000
+          },
+          "saucenao_hide": {
+            "description": "SauceNAO 成人内容隐藏级别",
+            "type": "int",
+            "default": 2,
+            "hint": "0 不隐藏；1 隐藏明确成人；2 隐藏明确及疑似成人；3 仅保留预期安全结果。"
+          },
+          "allow_adult_links_in_private": {
+            "description": "允许私聊显示成人结果标题和链接",
+            "type": "bool",
+            "default": false
+          }
+        }
+      },
+      "output": {
+        "description": "输出设置",
+        "type": "object",
+        "items": {
+          "force_text_message": {
+            "description": "始终使用文字消息，不进行文本转图片",
+            "type": "bool",
+            "default": true,
+            "hint": "开启后，本插件的文字无论多长都不会被 AstrBot 全局文转图规则转换成图片。"
+          }
+        }
+      }
+    }
+  }
+}

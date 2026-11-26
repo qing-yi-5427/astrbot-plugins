@@ -2,7 +2,7 @@ import { useId, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { Button as AriaButton, ComboBox, ListBox, Popover } from "react-aria-components";
 import {
-  RiAddLine, RiArrowLeftLine, RiArrowRightLine, RiArrowRightUpLine, RiCoupon3Line,
+  RiAddLine, RiArrowLeftLine, RiArrowRightLine, RiArrowRightUpLine, RiCloseLine, RiCoupon3Line,
   RiDownload2Line, RiFileEditLine, RiGroupLine, RiInbox2Line,
   RiLogoutBoxRLine, RiStackLine, RiRefreshLine, RiBarChartBoxLine,
 } from "@remixicon/react";
@@ -415,59 +415,90 @@ function SummaryPage({ model }: { model: Summary }) {
   </>;
 }
 
-function NicknamePicker({ label, field, options, selected, onSelect }: {
+type NicknamePickerProps = {
   label: string; field: string; options: NicknameOption[];
-  selected: NicknameOption | null; onSelect: (value: NicknameOption | null) => void;
-}) {
+} & (
+  { multiple: true; selected: string[]; onSelect: (keys: string[]) => void } |
+  { multiple?: false; selected: NicknameOption | null; onSelect: (value: NicknameOption | null) => void }
+);
+
+function NicknamePicker(props: NicknamePickerProps) {
+  const { label, field, options } = props;
   const [input, setInput] = useState("");
   const normalize = (value: string) => value.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
-  return <ComboBox className="merge-field" name={field} formValue="key" menuTrigger="focus"
-    selectedKey={selected?.id ?? null} inputValue={input} defaultItems={options}
-    defaultFilter={(name, query) => normalize(name).includes(normalize(query))}
-    isDisabled={!options.length} allowsEmptyCollection
-    onInputChange={(next) => {
-      setInput(next);
-      if (next !== selected?.label) onSelect(null);
-    }}
-    onSelectionChange={(key) => {
-      const option = options.find((value) => value.id === key) ?? null;
-      onSelect(option);
-      setInput(option?.label ?? "");
-    }}>
+  const common = {
+    className: "merge-field", name: field, formValue: "key", menuTrigger: "focus",
+    inputValue: input, defaultItems: options, isDisabled: !options.length, allowsEmptyCollection: true,
+    defaultFilter: (name: string, query: string) => normalize(name).includes(normalize(query)),
+  } as const;
+  const content = <>
     <Label>{label}</Label>
     <InputBase placeholder={options.length ? "输入昵称搜索" : "暂无可选昵称"} autoComplete="off"
+      onKeyDown={event => {
+        if (props.multiple && event.key === "Escape") setInput("");
+      }}
       trailingAddon={<AriaButton className="nickname-picker-toggle" aria-label={`展开${label}候选`}>
         <ChevronDownSmall aria-hidden />
       </AriaButton>} />
     <Popover className={cx(MENU_POPOVER_SURFACE, "nickname-picker-popover")} offset={4}>
       <ListBox className={MENU_ITEMS_CONTAINER} renderEmptyState={() => <p className="table-empty">未找到匹配昵称</p>}>
-        {(option: NicknameOption) => <SelectItem id={option.id} textValue={option.label}>{option.label}</SelectItem>}
+        {(option: NicknameOption) => <SelectItem id={option.id} textValue={option.label}>
+          {option.label}
+          {props.multiple && props.selected.includes(option.id) && <span aria-hidden className="nickname-option-check">✓</span>}
+        </SelectItem>}
       </ListBox>
     </Popover>
+  </>;
+  if (props.multiple) {
+    return <ComboBox<NicknameOption, "multiple"> {...common} selectionMode="multiple"
+      value={props.selected} onInputChange={setInput} onChange={keys => props.onSelect(keys.map(String))}>
+      {content}
+    </ComboBox>;
+  }
+  return <ComboBox {...common} selectedKey={props.selected?.id ?? null}
+    onInputChange={next => {
+      setInput(next);
+      if (next !== props.selected?.label) props.onSelect(null);
+    }}
+    onSelectionChange={key => {
+      const option = options.find(value => value.id === key) ?? null;
+      props.onSelect(option);
+      setInput(option?.label ?? "");
+    }}>
+    {content}
   </ComboBox>;
 }
 
 function NicknamesPage({ model }: { model: Nicknames }) {
   const { rules, message, old_options, target_options } = model.data;
   const csrf = model.account?.csrf;
-  const [old, selectOld] = useState<NicknameOption | null>(null);
+  const [old, selectOld] = useState<string[]>([]);
   const [target, selectTarget] = useState<NicknameOption | null>(null);
-  const same = old !== null && old.id === target?.id;
+  const same = target !== null && old.includes(target.id);
+  const chosen = old.map(id => old_options.find(option => option.id === id)).filter(option => option !== undefined);
   return <>
     <Back href="/panel/summary" label="抽奖总结" />
     <div className="page-heading">
       <div><h1>合并历史昵称</h1>
-        <p className="summary-description">将旧昵称下的参与和中奖次数归入同一个人。两种昵称都能搜索到合并后的记录。</p>
+        <p className="summary-description">选中一个或多个旧昵称，统一归入同一个昵称。</p>
       </div>
     </div>
     {message && <p className="nickname-feedback" role="status">{message}</p>}
     <section className="surface nickname-search" aria-label="添加合并">
       <form method="post" action="/panel/summary/nicknames" className="merge-form">
         <input type="hidden" name="csrf" value={csrf} />
-        <NicknamePicker label="旧昵称" field="old_choice" options={old_options} selected={old} onSelect={selectOld} />
+        <NicknamePicker multiple label="旧昵称" field="old_choice" options={old_options} selected={old} onSelect={selectOld} />
         <NicknamePicker label="归入昵称" field="target_choice" options={target_options} selected={target} onSelect={selectTarget} />
-        <Button type="submit" disabled={!old || !target || same}>合并昵称</Button>
-        {same && <p className="merge-form-hint" role="status">请选择两个不同的昵称。</p>}
+        <Button type="submit" disabled={!old.length || !target || same}>合并昵称</Button>
+        {!!chosen.length && <ul className="nickname-selection" aria-label="已选旧昵称">
+          {chosen.map(option => <li key={option.id}>
+            <Button size="xs" type="button" variant="ghost" trailingIcon={RiCloseLine}
+              aria-label={`移除 ${option.label}`} onClick={() => selectOld(ids => ids.filter(id => id !== option.id))}>
+              <span title={option.label}>{option.label}</span>
+            </Button>
+          </li>)}
+        </ul>}
+        {same && <p className="merge-form-hint" role="status">归入昵称与所选旧昵称重复，请换一个。</p>}
       </form>
     </section>
     <section className="surface" aria-label="已有合并">

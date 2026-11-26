@@ -18,7 +18,7 @@ from .store import PAGE_SIZE, STATUSES, RaffleError, display_time
 from .summary import (
     RANK_LIMIT,
     group_summary,
-    merge_nickname,
+    merge_nicknames,
     nickname_admin_data,
     undo_nickname_merge,
 )
@@ -502,19 +502,29 @@ class Dashboard:
             return failure
         form = await request.post()
         selected = "old_choice" in form or "target_choice" in form
-        fields = ("old_choice", "target_choice") if selected else ("old", "target")
-        old, target = (form.get(field) for field in fields)
-        if any(
-            not isinstance(value, str) or len(value) > 200 for value in (old, target)
+        old_field, target_field = (
+            ("old_choice", "target_choice") if selected else ("old", "target")
+        )
+        old_names, targets = form.getall(old_field, []), form.getall(target_field, [])
+        values = old_names + targets
+        if (
+            not old_names
+            or len(targets) != 1
+            or any(not isinstance(value, str) or len(value) > 200 for value in values)
         ):
             raise web.HTTPBadRequest(headers=HEADERS)
         if selected and any(
-            not re.fullmatch(r"[0-9a-f]{32}", value) for value in (old, target)
+            not re.fullmatch(r"[0-9a-f]{32}", value) for value in values
         ):
             raise web.HTTPBadRequest(headers=HEADERS)
         try:
             await asyncio.to_thread(
-                merge_nickname, self.store, actor.group, old, target, selected=selected
+                merge_nicknames,
+                self.store,
+                actor.group,
+                old_names,
+                targets[0],
+                selected=selected,
             )
         except RaffleError as exc:
             return operation_error(

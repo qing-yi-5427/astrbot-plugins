@@ -91,6 +91,11 @@ p { overflow-wrap: anywhere; }
 .nickname-picker-popover { width: var(--trigger-width); min-width: 10rem; padding: .35rem; }
 .nickname-picker-popover [role="listbox"] { max-height: min(15rem, 40dvh); overflow-y: auto; overscroll-behavior: contain; }
 .nickname-picker-popover [role="option"] { overflow-wrap: anywhere; }
+.nickname-option-check { margin-inline-start: auto; color: var(--color-status-blue-text); }
+.nickname-selection { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; }
+.nickname-selection li { min-width: 0; max-width: 100%; }
+.nickname-selection button { max-width: 100%; }
+.nickname-selection button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .merge-form-hint { grid-column: 1 / -1; color: var(--color-text-secondary); font-size: .85rem; }
 .merge-rules { list-style: none; }
 .merge-rules li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .65rem 1rem; border-top: 1px solid var(--dashboard-line); font-size: .875rem; }

@@ -326,6 +326,65 @@ def test_nickname_merge_can_link_to_one_live_account_and_rejects_two(raffle):
 
 
 @pytest.mark.asyncio
+async def test_admin_can_batch_merge_old_nicknames_atomically(raffle):
+    service, _ = raffle
+    store = service.store
+    import_history(
+        store,
+        GROUP,
+        {
+            "旧表": [
+                {
+                    "row": 2,
+                    "title": "旧奖品",
+                    "organizer": "群友",
+                    "deadline": "",
+                    "entrants": ["旧称甲", "旧称乙", "现在用的昵称", "另一人"],
+                    "winners": ["旧称甲", "旧称乙"],
+                }
+            ]
+        },
+    )
+    active = store.create(ADMIN, "新奖品", 1, NOW + 600, NOW)
+    store.join(Actor(GROUP, "61001", "现在用的昵称"), active, NOW)
+    store.join(Actor(GROUP, "61002", "另一人"), active, NOW)
+    path = "/panel/summary/nicknames"
+    async with TestClient(
+        TestServer(make_app(service, {(GROUP, ADMIN.qq): ADMIN}))
+    ) as client:
+        headers = await sign_in(client, service, ADMIN)
+        admin = page_model(await (await client.get(path, headers=headers)).text())
+        ids = {entry["label"]: entry["id"] for entry in admin["data"]["target_options"]}
+        common = [
+            ("csrf", admin["account"]["csrf"]),
+            ("target_choice", ids["现在用的昵称"]),
+        ]
+        response = await client.post(
+            path,
+            headers=headers,
+            data=common
+            + [
+                ("old_choice", ids["旧称甲"]),
+                ("old_choice", ids["另一人"]),
+            ],
+        )
+        assert response.status == 409
+        assert not nickname_admin_data(store, GROUP)["rules"]
+        batch = common + [("old_choice", ids["旧称甲"]), ("old_choice", ids["旧称乙"])]
+        for _ in range(2):
+            response = await client.post(path, headers=headers, data=batch)
+            data = page_model(await response.text())["data"]
+            assert {(rule["old"], rule["target"]) for rule in data["rules"]} == {
+                ("旧称甲", "现在用的昵称"),
+                ("旧称乙", "现在用的昵称"),
+            }
+        _, _, ranks = group_summary(store, GROUP, NOW, page=1, rank_query="旧称")
+        assert ranks["matches"] == [
+            {"name": "现在用的昵称", "entered": 2, "awarded": 1}
+        ]
+
+
+@pytest.mark.asyncio
 async def test_public_invite_requires_the_original_qq_and_browser(raffle):
     service, _ = raffle
     auth = WebAuth(service.store)

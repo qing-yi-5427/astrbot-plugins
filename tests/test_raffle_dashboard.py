@@ -135,6 +135,8 @@ async def test_summary_import_is_group_scoped_and_includes_live_result(raffle):
         assert model["view"] == "summary"
         assert model["data"]["rows"][0]["id"] == actual
         assert model["data"]["pager"]["next"] == "/panel/summary?page=2"
+        assert model["data"]["rankings"]["entered"][0]["count"] == 22
+        assert sum(row["count"] for row in model["data"]["rankings"]["awarded"]) == 2
         assert "测试奖品" not in json.dumps(model, ensure_ascii=False)
         response = await client.get(
             "/panel/summary?source=archive&page=2", headers=headers

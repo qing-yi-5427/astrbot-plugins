@@ -36,9 +36,11 @@ type Panel = View<"panel", {
 type SummaryRecord = {
   title: string; source: string; deadline: string; people: number; winners: string[];
 } & ({ id: number; state: State } | { id: null; source_row: number; organizer: string });
+type Rank = { rank: number; name: string; count: number };
 type Summary = View<"summary", {
   stats: { total: number; live: number; archive: number; people: number; with_results: number; winners: number };
   rows: SummaryRecord[]; source: "" | "archive" | "live"; pager: Pager;
+  rankings: { entered: Rank[]; awarded: Rank[] }; rank_limit: number;
 }>;
 type Raffle = View<"raffle", {
   id: number; state: State; own: number | null; people: number; slots: number; deadline: string;
@@ -272,8 +274,23 @@ function SummaryResult({ row, showLabel }: { row: SummaryRecord; showLabel?: boo
   return row.id === null ? <span className="soft">未登记结果</span> : <Status value={row.state} />;
 }
 
+function Leaderboard({ title, rows }: { title: string; rows: Rank[] }) {
+  return <section className="surface leaderboard" aria-label={title}>
+    <div className="section-heading"><h2>{title}</h2></div>
+    {rows.length ? <ol className="rank-list" aria-label={title}>
+      {rows.map((row, index) => <li key={index}>
+        <Counter className={cx("rank-place", row.rank <= 3 && "rank-place-prominent")}>
+          <span className="sr-only">第 </span>{row.rank}<span className="sr-only"> 名</span>
+        </Counter>
+        <span className="rank-name">{row.name}</span>
+        <strong>{row.count} 次</strong>
+      </li>)}
+    </ol> : <p className="table-empty">暂无记录</p>}
+  </section>;
+}
+
 function SummaryPage({ model }: { model: Summary }) {
-  const { stats, rows, source, pager } = model.data;
+  const { stats, rows, source, pager, rankings, rank_limit } = model.data;
   const metrics = [
     ["抽奖总场次", stats.total], ["累计参与人次", stats.people],
     ["有结果的场次", stats.with_results], ["记录中奖人次", stats.winners],
@@ -287,13 +304,19 @@ function SummaryPage({ model }: { model: Summary }) {
   return <>
     <div className="page-heading">
       <div><h1>抽奖总结</h1><p className="summary-description">云文档历史和本群机器人抽奖 · 参与按各场人次累计</p></div>
+      <ButtonLink variant="secondary" size="small" href="#summary-records">场次明细</ButtonLink>
     </div>
     <dl className="summary-metrics">
       {metrics.map(([label, value]) => <div className="surface" key={label}>
         <dt>{label}</dt><dd>{value.toLocaleString("zh-CN")}</dd>
       </div>)}
     </dl>
-    <section className="surface">
+    <section className="summary-rankings" aria-label="群友排行榜">
+      <Leaderboard title="参与次数榜" rows={rankings.entered} />
+      <Leaderboard title="中奖次数榜" rows={rankings.awarded} />
+      <p className="summary-description rank-note">各榜前 {rank_limit} 位 · 并列同名次 · 历史按登记昵称统计</p>
+    </section>
+    <section className="surface" id="summary-records">
       <div className="section-heading"><h2>场次明细</h2></div>
       <nav className="summary-filter" aria-label="记录来源">
         {sections.map(({ key, label, count }) => <ButtonLink key={key} size="small"

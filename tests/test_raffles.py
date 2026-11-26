@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from astrbot.api.message_components import Image
 from astrbot_plugin_qing_chat.features.raffle.cloud import (
     HEADERS,
     LEGACY_HEADERS,
@@ -14,6 +15,7 @@ from astrbot_plugin_qing_chat.features.raffle.cloud import (
 )
 from astrbot_plugin_qing_chat.features.raffle.main import RaffleService, mention_command
 from astrbot_plugin_qing_chat.features.raffle.store import Actor, RaffleError, Store
+from astrbot_plugin_qing_chat.features.raffle.summary import leaderboards
 
 NOW = 1800000000
 OWNER = Actor("default:GroupMessage:123", "1001", "发起人")
@@ -407,6 +409,57 @@ def group_event(qq, text, *, group="123", quoted=False):
         stop_event=Mock(),
         send=AsyncMock(),
     )
+
+
+def test_raffle_leaderboards_have_one_entry_per_raffle_and_keep_ambiguous_names():
+    old_name = {"qq": "10000001", "name": "Alpha"}
+    new_name = {"qq": "10000001", "name": "阿尔法"}
+    same_nickname = {"qq": "10000002", "name": "小满"}
+    another_same_nickname = {"qq": "10000003", "name": "小满"}
+    rankings = leaderboards(
+        [
+            ([new_name, same_nickname], [new_name]),
+            ([old_name, another_same_nickname], [another_same_nickname]),
+        ],
+        [
+            ([" ＡＬＰＨＡ ", "alpha", "小满", "100001234"], ["Alpha", "alpha"]),
+            (["小满"], ["仅登记获奖"]),
+        ],
+    )
+    assert rankings["entered"][0] == {"rank": 1, "name": "阿尔法", "count": 3}
+    assert rankings["entered"][1] == {"rank": 2, "name": "小满", "count": 2}
+    assert [row["rank"] for row in rankings["entered"][2:]] == [3, 3, 3]
+    assert "100001234" not in str(rankings)
+    assert rankings["awarded"][0] == {"rank": 1, "name": "阿尔法", "count": 2}
+    assert {row["name"] for row in rankings["awarded"][1:]} == {"小满", "仅登记获奖"}
+    assert [row["rank"] for row in rankings["awarded"]] == [1, 2, 2]
+
+
+@pytest.mark.asyncio
+async def test_summary_sends_image_and_falls_back_to_text(storage, monkeypatch):
+    from astrbot_plugin_qing_chat.features.raffle import main
+
+    service = RaffleService(None, {})
+    service.store = storage
+    raffle = storage.create(OWNER, "礼物", 1, NOW + 60, NOW)
+    storage.join(GUEST, raffle, NOW)
+    monkeypatch.setattr(main, "render_summary", lambda *_: b"test-png")
+    event = group_event(OWNER.qq, "/抽奖 总结")
+    await service.handle(event, "总结")
+    event.send.assert_awaited_once()
+    chain = event.send.await_args.args[0].chain
+    assert len(chain) == 1 and isinstance(chain[0], Image)
+    event.should_call_llm.assert_called_once_with(False)
+
+    def unavailable(*_):
+        raise OSError("missing CJK font")
+
+    monkeypatch.setattr(main, "render_summary", unavailable)
+    event = group_event(OWNER.qq, "/抽奖 总结")
+    await service.handle(event, "总结")
+    body = event.send.await_args.args[0].get_plain_text()
+    assert "共 1 场" in body and "参与榜　报名人 1 次" in body
+    assert body == await service.execute(OWNER, "总结 文字", with_image=True)
 
 
 @pytest.mark.asyncio

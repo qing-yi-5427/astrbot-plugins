@@ -10,6 +10,7 @@ from pathlib import Path
 
 from aiohttp import web
 from astrbot.api.event import MessageChain, filter
+from astrbot.api.message_components import Image
 from astrbot.api.star import StarTools
 
 from ...runtime import FeatureService
@@ -27,6 +28,7 @@ from .store import (
     validate_details,
 )
 from .summary import group_summary
+from .summary_image import render_summary
 from .web_auth import INVITE_TTL, WebAuth
 
 HELP_CARD = Path(__file__).with_name("assets") / "help.png"
@@ -55,7 +57,7 @@ HELP = (
     "/抽奖管理 · 领取 5 分钟有效的网页入口，优先私发。"
     "收到群内入口时，按页面提示在原群确认\n"
     "/抽奖 同步状态 · 查看腾讯文档同步进度\n"
-    "/抽奖 总结 · 查看本群历年抽奖和报名统计\n\n"
+    "/抽奖 总结 · 查看本群历年统计、参与榜和中奖榜\n\n"
     "报名截止时会 @ 发起人；离截止超过 1 小时发起的场次还有一次提前提醒。"
     "完整流水可在网页查询。抽奖、参与者和获奖人会更新到本群绑定的腾讯文档「bot 抽奖记录」。"
 )
@@ -332,7 +334,9 @@ class RaffleService(FeatureService):
             elif command == "帮助" and HELP_CARD.is_file():
                 reply = MessageChain(use_t2i_=False).file_image(str(HELP_CARD))
             else:
-                reply = await self.execute(actor, command, with_mentions=True)
+                reply = await self.execute(
+                    actor, command, with_mentions=True, with_image=True
+                )
         except RaffleError as exc:
             reply = str(exc)
         except Exception as exc:
@@ -395,7 +399,7 @@ class RaffleService(FeatureService):
             f"{self.form_url}/a/{token}"
         )
 
-    async def execute(self, actor, command, *, with_mentions=False):
+    async def execute(self, actor, command, *, with_mentions=False, with_image=False):
         parts = (command.strip() or "进行中").split(maxsplit=4)
         action, *args = parts
         now = int(time.time())
@@ -403,19 +407,9 @@ class RaffleService(FeatureService):
             return HELP
         if action == "管理" and not args:
             return "在原 QQ 群发 /抽奖管理 领取管理入口。"
-        if action == "总结" and not args:
-            stats, _ = await asyncio.to_thread(
-                group_summary, self.store, actor.group, now
-            )
-            if not stats["total"]:
-                return "本群还没有可统计的抽奖记录。"
-            return (
-                "【本群抽奖总结】\n"
-                f"共 {stats['total']} 场（云文档历史 {stats['archive']} 场，"
-                f"机器人 {stats['live']} 场）\n"
-                f"累计参与 {stats['people']} 人次\n"
-                f"{stats['with_results']} 场有结果，记录中奖 {stats['winners']} 人次\n"
-                "发 /抽奖管理，在网页「抽奖总结」查看明细。"
+        if action == "总结" and args in ([], ["文字"]):
+            return await self.summarize(
+                actor, now, as_image=with_image and not args
             )
         if action == "登录":
             return "网页入口已改为限时链接。在本群发 /抽奖管理 领取。"
@@ -529,6 +523,34 @@ class RaffleService(FeatureService):
                 return f"抽奖 #{raffle_id} 已取消。"
             return await self.draw(actor, raffle_id, now, with_mentions)
         return HELP
+
+    async def summarize(self, actor, now, *, as_image):
+        stats, _, rankings = await asyncio.to_thread(
+            group_summary, self.store, actor.group, now
+        )
+        if as_image:
+            try:
+                data = await asyncio.to_thread(render_summary, stats, rankings)
+                return MessageChain(chain=[Image.fromBytes(data)], use_t2i_=False)
+            except (ImportError, OSError, ValueError, RuntimeError) as exc:
+                self.logger.warning(
+                    "抽奖总结图片生成失败 (%s)，已切换文字", type(exc).__name__
+                )
+        if not stats["total"]:
+            return "本群还没有可统计的抽奖记录。"
+        lines = [
+            "【本群抽奖总结】",
+            f"共 {stats['total']} 场（云文档历史 {stats['archive']} 场，机器人 {stats['live']} 场）",
+            f"累计参与 {stats['people']} 人次",
+            f"{stats['with_results']} 场有结果，记录中奖 {stats['winners']} 人次",
+        ]
+        for name, key in (("参与榜", "entered"), ("中奖榜", "awarded")):
+            preview = "、".join(
+                f"{r['name']} {r['count']} 次" for r in rankings[key][:3]
+            )
+            if preview:
+                lines.append(f"{name}　{preview}")
+        return "\n".join(lines + ["发 /抽奖管理，在网页「抽奖总结」查看明细。"])
 
     async def join(self, actor, raffle_id, now):
         slot, created = await asyncio.to_thread(self.store.join, actor, raffle_id, now)

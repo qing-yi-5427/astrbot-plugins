@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 from aiohttp import web
 
 from .store import PAGE_SIZE, STATUSES, RaffleError, display_time
-from .summary import group_summary
+from .summary import RANK_LIMIT, group_summary
 from .web_auth import COOKIE, INVITE_TTL, SESSION_TTL, WebAuth
 from .web_records import (
     REMINDERS,
@@ -427,7 +427,7 @@ class Dashboard:
         source = request.query.get("source", "")
         if source not in {"archive", "live"}:
             source = ""
-        stats, rows = await asyncio.to_thread(
+        stats, rows, rankings = await asyncio.to_thread(
             group_summary,
             self.store,
             actor.group,
@@ -447,6 +447,8 @@ class Dashboard:
             "summary",
             {
                 "stats": stats,
+                "rankings": rankings,
+                "rank_limit": RANK_LIMIT,
                 "rows": rows[:PAGE_SIZE],
                 "source": source,
                 "pager": pagination(number, len(rows) > PAGE_SIZE, link),

@@ -78,6 +78,16 @@ p { overflow-wrap: anywhere; }
 .summary-filter { display: flex; flex-wrap: wrap; gap: .45rem; padding: 0 1rem .75rem; }
 .summary-table [role="gridcell"]:last-child { white-space: normal; overflow-wrap: anywhere; }
 .summary-result { margin-top: .4rem; font-size: .85rem; }
+.summary-rankings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; align-items: start; margin-bottom: 1.15rem; }
+.leaderboard .section-heading { border-bottom: 1px solid var(--dashboard-line); }
+.rank-list { list-style: none; }
+.rank-list li { display: grid; grid-template-columns: 1.8rem minmax(0, 1fr) max-content; align-items: center; gap: .65rem; padding: .55rem 1rem; }
+.rank-list li + li { border-top: 1px solid var(--dashboard-line); }
+.rank-list .rank-place { justify-content: center; min-height: 1.4rem; }
+.rank-place-prominent { background: var(--color-status-blue-background); color: var(--color-status-blue-text); }
+.rank-name { overflow-wrap: anywhere; font-size: .875rem; }
+.rank-list strong { color: var(--color-status-blue-text); font-size: .875rem; font-variant-numeric: tabular-nums; }
+.rank-note { grid-column: 1 / -1; margin: 0; }
 .form-card { display: grid; justify-items: start; gap: .75rem; padding: 1.5rem; max-width: 39rem; }
 .form-card p, .form-card .facts { margin: 0; width: 100%; }
 .form-card p { line-height: 1.6; }
@@ -113,6 +123,7 @@ noscript { display: block; padding: 2rem; }
   .record-summary { margin-top: .45rem; display: flex; gap: .25rem .8rem; flex-wrap: wrap; }
   .sync-progress { margin-inline-start: 2.7rem; }
   .summary-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-rankings { grid-template-columns: minmax(0, 1fr); }
   .navigation .nav-link { padding-inline: .35rem; gap: .15rem; }
   .section-heading { align-items: flex-start; }
   .raffle-summary, .form-card { padding: 1rem; }

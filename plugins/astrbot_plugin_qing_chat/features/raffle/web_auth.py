@@ -1,4 +1,4 @@
-"""Pair a browser with the QQ member who verifies its one-time code."""
+"""One-use, bot-issued links and sessions scoped to the requesting QQ member."""
 
 import hashlib
 import hmac
@@ -8,11 +8,11 @@ from dataclasses import dataclass
 
 from .store import RaffleError
 
-COOKIE = "__Host-raffle"
-LOGIN_TTL = 5 * 60
-SESSION_TTL = 8 * 60 * 60
-BROWSER = re.compile(r"([0-9a-f]{8})\.([A-Za-z0-9_-]{43})")
-CODE = re.compile(r"([0-9a-f]{8})-([0-9a-f]{24})-([0-9a-f]{24})")
+COOKIE = "__Host-raffle-access"
+INVITE_TTL = 5 * 60
+SESSION_TTL = 30 * 60
+TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
+CODE = re.compile(r"([0-9a-f]{32})-([0-9a-f]{32})-([0-9a-f]{24})")
 
 
 @dataclass(frozen=True)
@@ -25,51 +25,91 @@ class WebAuth:
     def __init__(self, store):
         self.store = store
 
-    @staticmethod
-    def start(now):
-        return f"{now + LOGIN_TTL:x}.{secrets.token_urlsafe(32)}"
-
     def sign(self, purpose, value):
         return hmac.new(
             self.store.secret, f"raffle-web:{purpose}:{value}".encode(), hashlib.sha256
         ).hexdigest()
 
-    def challenge(self, browser, now):
-        match = BROWSER.fullmatch(browser)
-        if match is None or not now < int(match[1], 16) <= now + LOGIN_TTL:
+    @staticmethod
+    def key(token):
+        return hashlib.sha256(token.encode()).hexdigest()[:32]
+
+    def issue(self, actor, now, *, private, replace=True):
+        token = secrets.token_urlsafe(32)
+        with self.store.transaction(write=True) as db:
+            db.execute("DELETE FROM web_grants WHERE ends<=?", (now,))
+            db.execute("DELETE FROM web_sessions WHERE ends<=?", (now,))
+            if replace:
+                db.execute(
+                    "DELETE FROM web_grants WHERE scope=? AND qq=?",
+                    (actor.group, actor.qq),
+                )
+            db.execute(
+                "INSERT INTO web_grants VALUES (?,?,?,?,?)",
+                (self.key(token), actor.group, actor.qq, now + INVITE_TTL, private),
+            )
+        return token
+
+    def grant(self, token, now):
+        if not TOKEN.fullmatch(token):
             return None
-        prefix = f"{match[1]}-{self.key(browser)}"
-        return f"{prefix}-{self.sign('login', prefix)[:24]}"
+        with self.store.transaction() as db:
+            return db.execute(
+                "SELECT * FROM web_grants WHERE grant_key=? AND ends>?",
+                (self.key(token), now),
+            ).fetchone()
+
+    def shared_challenge(self, token):
+        browser = secrets.token_urlsafe(32)
+        prefix = f"{self.key(token)}-{self.key(browser)}"
+        return browser, f"{prefix}-{self.sign('shared', prefix)[:24]}"
+
+    def accept_private(self, token, now):
+        if not TOKEN.fullmatch(token):
+            return None
+        browser = secrets.token_urlsafe(32)
+        with self.store.transaction(write=True) as db:
+            grant = db.execute(
+                "SELECT * FROM web_grants WHERE grant_key=? AND private=1 AND ends>?",
+                (self.key(token), now),
+            ).fetchone()
+            if grant is None:
+                return None
+            self.activate(db, grant, self.key(browser), now)
+        return browser
+
+    def approve_shared(self, actor, code, now):
+        match = CODE.fullmatch(code.lower())
+        if match is None or not hmac.compare_digest(
+            self.sign("shared", f"{match[1]}-{match[2]}")[:24], match[3]
+        ):
+            raise RaffleError("请复制机器人发来的网页上的访问确认指令。")
+        with self.store.transaction(write=True) as db:
+            grant = db.execute(
+                """SELECT * FROM web_grants WHERE grant_key=? AND private=0
+                   AND scope=? AND qq=? AND ends>?""",
+                (match[1], actor.group, actor.qq, now),
+            ).fetchone()
+            if grant is None:
+                raise RaffleError(
+                    "只有在原群领取链接的 QQ 号才能确认，链接须在有效期内使用一次。"
+                )
+            self.activate(db, grant, match[2], now)
 
     @staticmethod
-    def key(browser):
-        return hashlib.sha256(browser.encode()).hexdigest()[:24]
-
-    def approve(self, actor, code, now):
-        match = CODE.fullmatch(code.lower())
-        if match is None:
-            raise RaffleError("请复制你自己在抽奖网页上看到的登录指令。")
-        expires = int(match[1], 16)
-        expected = self.sign("login", f"{match[1]}-{match[2]}")[:24]
-        if not now < expires <= now + LOGIN_TTL or not hmac.compare_digest(
-            expected, match[3]
-        ):
-            raise RaffleError("登录指令无效或已过期，请在网页重新生成。")
-        with self.store.transaction(write=True) as db:
-            db.execute(
-                "DELETE FROM web_sessions WHERE ends<=? AND challenge_ends<=?",
-                (now, now),
-            )
-            result = db.execute(
-                """INSERT OR IGNORE INTO web_sessions
-                (browser_key,scope,qq,ends,challenge_ends) VALUES (?,?,?,?,?)""",
-                (match[2], actor.group, actor.qq, now + SESSION_TTL, expires),
-            )
-            if not result.rowcount:
-                raise RaffleError("这条登录指令已使用，请返回原浏览器或重新生成。")
+    def activate(db, grant, browser_key, now):
+        db.execute(
+            """INSERT INTO web_sessions (browser_key,scope,qq,ends,challenge_ends)
+               VALUES (?,?,?,?,?)""",
+            (browser_key, grant["scope"], grant["qq"], now + SESSION_TTL, 0),
+        )
+        db.execute(
+            "DELETE FROM web_grants WHERE scope=? AND qq=?",
+            (grant["scope"], grant["qq"]),
+        )
 
     def session(self, browser, now):
-        if not BROWSER.fullmatch(browser):
+        if not TOKEN.fullmatch(browser):
             return None
         with self.store.transaction() as db:
             row = db.execute(
@@ -79,10 +119,8 @@ class WebAuth:
             return Session(*row) if row else None
 
     def logout(self, browser):
-        # Keep the consumed challenge until it expires to prevent re-approval.
-        if BROWSER.fullmatch(browser):
+        if TOKEN.fullmatch(browser):
             with self.store.transaction(write=True) as db:
                 db.execute(
-                    "UPDATE web_sessions SET ends=0 WHERE browser_key=?",
-                    (self.key(browser),),
+                    "DELETE FROM web_sessions WHERE browser_key=?", (self.key(browser),)
                 )

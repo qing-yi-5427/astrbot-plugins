@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 from aiohttp import web
 
 from .store import PAGE_SIZE, STATUSES, RaffleError, display_time
-from .web_auth import COOKIE, LOGIN_TTL, SESSION_TTL, WebAuth
+from .web_auth import COOKIE, INVITE_TTL, SESSION_TTL, WebAuth
 from .web_records import (
     REMINDERS,
     RecordFilters,
@@ -136,17 +136,31 @@ def list_card(row, actor):
 <p class="raffle-meta">{display_time(row["deadline"])} 截止</p>{mine}</a></li>"""
 
 
-def login_body(challenge):
-    if not challenge:
-        return f"""<section class="intro">
-<h1>群抽奖管理台</h1><p>查看本群抽奖、报名进度和历史结果。请通过 QQ 群验证身份。</p>
-{post_button("/login", "通过 QQ 群登录")}</section>"""
+def locked():
+    return page(
+        "需要机器人发来的链接",
+        '<section class="intro"><h1>群抽奖管理台</h1>'
+        "<p>在 QQ 群发 <strong>/抽奖</strong>，用机器人发来的限时链接进入。</p></section>",
+        status=403,
+    )
+
+
+def invite_invalid():
+    return page(
+        "链接已失效",
+        '<section class="intro"><h1>链接已失效</h1>'
+        "<p>如果已开启网页会话，可回到管理台。需要新链接时，在原群发 /抽奖。</p>"
+        '<a class="button" href="/panel">返回管理台</a></section>',
+        status=404,
+    )
+
+
+def shared_body(challenge):
     return f"""<section class="intro">
-<h1>在 QQ 群确认登录</h1><p>请在要管理的群发送下方指令。指令 5 分钟内有效。</p>
-{copy_command("复制登录指令", f"/抽奖 登录 {challenge}", show=True)}
-<p class="hint">只发送这个页面显示的指令。每个浏览器使用自己的指令。</p>
-<div class="actions"><a class="button" href="/panel">我已发送，进入管理台</a>
-{post_button("/login", "重新生成", css="secondary")}</div></section>"""
+<h1>在原群确认访问</h1><p>群里的链接需要由领取它的 QQ 号确认。</p>
+{copy_command("复制访问确认指令", f"/抽奖 访问 {challenge}", show=True)}
+<p class="hint">在原群发送当前页面上的指令，确认后回到这个页面。</p>
+<div class="actions"><a class="button" href="/panel">我已确认，进入管理台</a></div></section>"""
 
 
 def filters_bar(filters, counts):
@@ -297,27 +311,58 @@ class Dashboard:
     def csrf(self, request):
         return self.auth.sign("csrf", self.browser(request))
 
-    async def login(self, request):
-        browser = self.browser(request)
-        now = int(time.time())
-        if await asyncio.to_thread(self.auth.session, browser, now):
+    async def landing(self, request):
+        if await asyncio.to_thread(
+            self.auth.session, self.browser(request), int(time.time())
+        ):
             raise web.HTTPSeeOther("/panel", headers=HEADERS)
-        challenge = self.auth.challenge(browser, now)
-        return page("登录", login_body(challenge))
+        return locked()
 
-    async def start(self, request):
+    async def invite(self, request):
+        token = request.match_info["token"]
+        grant = await asyncio.to_thread(self.auth.grant, token, int(time.time()))
+        if grant is None:
+            return invite_invalid()
+        hint = (
+            "这是机器人私发的一次性链接。开启后可在此浏览器使用 30 分钟。"
+            if grant["private"]
+            else "请点击继续，由领取者在原 QQ 群确认本次访问。"
+        )
+        return page(
+            "打开抽奖管理台",
+            f'<section class="intro"><h1>打开抽奖管理台</h1><p>{hint}</p>'
+            f"{post_button('/a/' + token, '继续')}</section>",
+        )
+
+    async def activate(self, request):
         await self.check_post(request)
-        browser = self.auth.start(int(time.time()))
-        response = web.HTTPSeeOther("/login", headers=HEADERS)
+        token = request.match_info["token"]
+        now = int(time.time())
+        grant = await asyncio.to_thread(self.auth.grant, token, now)
+        if grant is None:
+            return invite_invalid()
+        if not grant["private"]:
+            browser, challenge = self.auth.shared_challenge(token)
+            response = page("确认访问", shared_body(challenge))
+            self.set_cookie(response, browser, INVITE_TTL + SESSION_TTL)
+            return response
+        browser = await asyncio.to_thread(self.auth.accept_private, token, now)
+        if browser is None:
+            return invite_invalid()
+        response = web.HTTPSeeOther("/panel", headers=HEADERS)
+        self.set_cookie(response, browser, SESSION_TTL)
+        raise response
+
+    @staticmethod
+    def set_cookie(response, browser, max_age):
         response.set_cookie(
             COOKIE,
             browser,
             secure=True,
             httponly=True,
             samesite="Strict",
-            max_age=SESSION_TTL + LOGIN_TTL,
+            max_age=max_age,
         )
-        raise response
 
     async def check_post(self, request, require_csrf=False):
         if (
@@ -341,7 +386,7 @@ class Dashboard:
             self.auth.session, self.browser(request), int(time.time())
         )
         if session is None:
-            raise web.HTTPSeeOther("/login", headers=HEADERS)
+            return None, locked()
         try:
             actor = await self.resolve_actor(session)
         except QQUnavailable:
@@ -602,9 +647,11 @@ def add_dashboard(app, store, origin, resolve_actor, sync_status, require_docume
             return web.Response(body=data, content_type=mime, headers=HEADERS)
 
         app.router.add_get("/assets/" + filename, asset)
-    app.router.add_get("/", dashboard.login)
-    app.router.add_get("/login", dashboard.login)
-    app.router.add_post("/login", dashboard.start)
+    app.router.add_get("/", dashboard.landing)
+    app.router.add_get(
+        r"/a/{token:[A-Za-z0-9_-]{43}}", dashboard.invite, allow_head=False
+    )
+    app.router.add_post(r"/a/{token:[A-Za-z0-9_-]{43}}", dashboard.activate)
     app.router.add_post("/logout", dashboard.logout)
     app.router.add_get("/panel", dashboard.panel)
     app.router.add_post("/panel/new", dashboard.new_draft)

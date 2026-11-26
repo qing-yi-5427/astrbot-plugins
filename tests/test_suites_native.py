@@ -495,6 +495,20 @@ async def test_qq_raffle_command_and_mention_use_same_store():
         await suite.raffle_mention(normal)
         normal.send.assert_not_awaited()
         assert not normal.is_stopped()
+
+        raffle = suite.modules.services["raffle"]
+        raffle.form_url = "https://raffle.example.test"
+        access = qq_event("抽奖", [Plain("抽奖")])
+        assert command_filter.filter(access, {})
+        assert access.get_extra("parsed_params") == {"command": ""}
+        access.bot.call_action.return_value = {"message_id": 123}
+        access.send = AsyncMock()
+        await suite.raffle_command(access, **access.get_extra("parsed_params"))
+        private = access.bot.call_action.await_args
+        assert private.args == ("send_private_msg",)
+        assert "/a/" in private.kwargs["message"][0]["data"]["text"]
+        assert "已私发" in access.send.await_args.args[0].get_plain_text()
+        assert "/a/" not in access.send.await_args.args[0].get_plain_text()
     finally:
         await suite.terminate()
 

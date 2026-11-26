@@ -100,7 +100,7 @@ def saved(row):
 <p>请用发起表单的 QQ 号，在原群发送这条指令。</p>
 <label>确认指令<input id="command" readonly value="/抽奖 确认 {escape(row["code"])}"></label>
 <button id="copy" type="button">复制确认指令</button>
-<p>已通过 QQ 群登录？<a href="/panel/draft">在管理台发布这场抽奖</a></p>
+<p>已打开机器人发来的管理入口？<a href="/panel/draft">在管理台发布这场抽奖</a></p>
 <script>{SCRIPT}</script>""",
     )
 

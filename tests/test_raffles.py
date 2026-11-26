@@ -453,7 +453,7 @@ async def test_help_and_new_raffle_binding(storage):
             "取消",
             "不要引用回复",
             "腾讯文档",
-            service.form_url,
+            "领取 5 分钟有效",
         )
     )
     with pytest.raises(RaffleError, match="未绑定"):
@@ -461,3 +461,27 @@ async def test_help_and_new_raffle_binding(storage):
     assert not storage.unsynced(0)
     service.document_bindings["123"] = "file-test"
     assert f"{service.form_url}/f/" in await service.execute(OWNER, "发起")
+
+
+@pytest.mark.asyncio
+async def test_private_send_failure_shares_only_confirmation_link(storage, monkeypatch):
+    import time
+
+    from astrbot_plugin_qing_chat.features.raffle.web_auth import WebAuth
+
+    monkeypatch.setattr(time, "time", lambda: NOW)
+    service = RaffleService(None, {})
+    service.store = storage
+    service.form_url = "https://raffle.example.test"
+    event = group_event(OWNER.qq, "/抽奖")
+    event.bot = SimpleNamespace(call_action=AsyncMock(side_effect=TimeoutError()))
+    await service.handle(event, "")
+    direct = event.bot.call_action.await_args.kwargs["message"][0]["data"]["text"]
+    shared = event.send.await_args.args[0].get_plain_text()
+    private_token = direct.rsplit("/", 1)[-1]
+    shared_token = shared.rsplit("/", 1)[-1]
+    assert private_token != shared_token and private_token not in shared
+    auth = WebAuth(storage)
+    assert auth.grant(private_token, NOW)["private"] == 1
+    assert auth.grant(shared_token, NOW)["private"] == 0
+    assert auth.accept_private(shared_token, NOW) is None

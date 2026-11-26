@@ -106,6 +106,12 @@ class Store:
             db.execute("""CREATE TABLE IF NOT EXISTS web_sessions (
                 browser_key TEXT PRIMARY KEY, scope TEXT NOT NULL, qq TEXT NOT NULL,
                 ends INTEGER NOT NULL, challenge_ends INTEGER NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS web_grants (
+                grant_key TEXT PRIMARY KEY, scope TEXT NOT NULL, qq TEXT NOT NULL,
+                ends INTEGER NOT NULL, private INTEGER NOT NULL)""")
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS web_grants_actor ON web_grants(scope,qq)"
+            )
             db.execute("""CREATE TABLE IF NOT EXISTS web_notices (
                 raffle INTEGER NOT NULL REFERENCES raffles(id), kind TEXT NOT NULL,
                 due INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',

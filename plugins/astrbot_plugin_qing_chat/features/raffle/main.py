@@ -25,7 +25,7 @@ from .store import (
     display_time,
     validate_details,
 )
-from .web_auth import WebAuth
+from .web_auth import INVITE_TTL, WebAuth
 
 HELP = (
     "【QQ群抽奖使用说明】\n\n"
@@ -46,7 +46,8 @@ HELP = (
     "/抽奖 历史 [页码] · 查已结束的场次\n"
     "/抽奖 结果 编号 [页码] · 查原开奖结果\n"
     "/抽奖 取消 编号 · 发起人或群管理取消\n"
-    "/抽奖 管理 · 打开网页，按提示在原群确认登录\n"
+    "/抽奖 或 /抽奖 管理 · 领取 5 分钟有效的网页入口，优先私发。"
+    "收到群内入口时，按页面提示在原群确认\n"
     "/抽奖 同步状态 · 查看腾讯文档同步进度\n\n"
     "报名截止时会 @ 发起人；离截止超过 1 小时发起的场次还有一次提前提醒。"
     "发布后的发起、报名、开奖、取消与提醒记录在网页可查，并同步到本群绑定的腾讯文档「bot 抽奖记录」。"
@@ -56,6 +57,7 @@ ACTIONS = {
     "发起",
     "管理",
     "登录",
+    "访问",
     "确认",
     "报名",
     "列表",
@@ -108,7 +110,7 @@ def mention_command(event):
     if not at_bot or not tokens:
         return None
     if tokens[0] == "抽奖":
-        return tokens[1] if len(tokens) > 1 else "帮助"
+        return tokens[1] if len(tokens) > 1 else "管理"
     return command if tokens[0] in ACTIONS else None
 
 
@@ -312,7 +314,10 @@ class RaffleService(FeatureService):
         )
         event.should_call_llm(False)
         try:
-            reply = await self.execute(actor, command, with_mentions=True)
+            if command.strip() in {"", "管理"}:
+                reply = await self.send_access(event, actor)
+            else:
+                reply = await self.execute(actor, command, with_mentions=True)
         except RaffleError as exc:
             reply = str(exc)
         except Exception as exc:
@@ -335,30 +340,65 @@ class RaffleService(FeatureService):
         finally:
             event.stop_event()
 
+    async def send_access(self, event, actor):
+        if not self.form_url:
+            return "抽奖管理台暂未开启，可用 /抽奖 列表 查看记录。"
+        auth = WebAuth(self.store)
+        private_token = await asyncio.to_thread(
+            auth.issue, actor, int(time.time()), private=True
+        )
+        minutes = INVITE_TTL // 60
+        url = f"{self.form_url}/a/{private_token}"
+        try:
+            async with asyncio.timeout(5):
+                data = await event.bot.call_action(
+                    "send_private_msg",
+                    user_id=int(actor.qq),
+                    message=[
+                        {
+                            "type": "text",
+                            "data": {
+                                "text": (
+                                    f"你的群抽奖管理入口，{minutes} 分钟内使用一次。请勿转发。\n{url}"
+                                )
+                            },
+                        }
+                    ],
+                )
+            if isinstance(data, Mapping) and data.get("message_id") is not None:
+                return "抽奖管理入口已私发，请查看机器人私聊。"
+        except Exception as exc:
+            self.logger.info("抽奖访问链接私发回执未确认 (%s)", type(exc).__name__)
+        token = await asyncio.to_thread(
+            auth.issue, actor, int(time.time()), private=False, replace=False
+        )
+        return (
+            f"可以用这个入口打开抽奖管理台，{minutes} 分钟内由领取者在原群确认。\n"
+            f"{self.form_url}/a/{token}"
+        )
+
     async def execute(self, actor, command, *, with_mentions=False):
         parts = (command.strip() or "帮助").split(maxsplit=4)
         action, *args = parts
         now = int(time.time())
         if action == "帮助" or action not in ACTIONS:
-            return self.help()
+            return HELP
         if action == "管理" and not args:
-            return (
-                f"本群抽奖管理台：{self.form_url}\n打开后选择「通过 QQ 群登录」。"
-                if self.form_url
-                else "抽奖管理台暂未开启，可用 /抽奖 列表 查看记录。"
+            return "在原 QQ 群发 /抽奖 领取管理入口。"
+        if action == "登录":
+            return "网页入口已改为限时链接。在本群发 /抽奖 领取。"
+        if action == "访问" and len(args) == 1 and self.form_url:
+            await asyncio.to_thread(
+                WebAuth(self.store).approve_shared, actor, args[0], now
             )
-        if action == "登录" and len(args) == 1 and self.form_url:
-            await asyncio.to_thread(WebAuth(self.store).approve, actor, args[0], now)
-            return (
-                "已验证本群身份，请返回生成指令的网页，点击「我已发送，进入管理台」。"
-            )
+            return "已确认本群访问权限。回到原网页，点击「我已确认，进入管理台」。"
         if action == "发起":
             self.require_document(actor)
             if not args and self.form_url:
                 token = await asyncio.to_thread(self.store.new_form, actor, now)
                 return f"打开表单填写奖品、人数和截止时间（链接 15 分钟有效）：\n{self.form_url}/f/{token}\n填完后复制确认指令，回本群发布。"
             if len(args) != 4:
-                return self.help()
+                return HELP
             title, slots, deadline = validate_details(
                 args[3], number(args[0]), f"{args[1]} {args[2]}", now
             )
@@ -430,10 +470,7 @@ class RaffleService(FeatureService):
                 )
                 return f"抽奖 #{raffle_id} 已取消。"
             return await self.draw(actor, raffle_id, now, with_mentions)
-        return self.help()
-
-    def help(self):
-        return f"{HELP}\n\n网页管理台：{self.form_url}" if self.form_url else HELP
+        return HELP
 
     async def join(self, actor, raffle_id, now):
         slot, created = await asyncio.to_thread(self.store.join, actor, raffle_id, now)

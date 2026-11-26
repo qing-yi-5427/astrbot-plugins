@@ -1,4 +1,5 @@
 import re
+import time
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -14,7 +15,12 @@ from astrbot_plugin_qing_chat.features.raffle.store import (
     RaffleError,
     Store,
 )
-from astrbot_plugin_qing_chat.features.raffle.web_auth import COOKIE, LOGIN_TTL, WebAuth
+from astrbot_plugin_qing_chat.features.raffle.web_auth import (
+    COOKIE,
+    INVITE_TTL,
+    SESSION_TTL,
+    WebAuth,
+)
 
 NOW = 1800000000
 ORIGIN = "https://raffle.example.test"
@@ -27,8 +33,6 @@ OTHER = Actor("default:GroupMessage:456", OWNER.qq, "其他群成员")
 
 @pytest.fixture
 def raffle(tmp_path, monkeypatch):
-    import time
-
     clock = SimpleNamespace(now=NOW)
     monkeypatch.setattr(time, "time", lambda: clock.now)
     service = RaffleService(None, {})
@@ -39,21 +43,20 @@ def raffle(tmp_path, monkeypatch):
 
 
 async def sign_in(client, service, actor):
+    token = WebAuth(service.store).issue(actor, int(time.time()), private=True)
+    path = "/a/" + token
+    preview = await client.get(path)
+    assert preview.status == 200 and not preview.cookies
     response = await client.post(
-        "/login", headers={"Origin": ORIGIN}, allow_redirects=False
+        path, headers={"Origin": ORIGIN}, allow_redirects=False
     )
-    assert response.status == 303
+    assert response.status == 303 and response.headers["Location"] == "/panel"
     cookie = response.cookies[COOKIE]
     assert cookie["secure"] and cookie["httponly"] and cookie["samesite"] == "Strict"
     assert cookie["path"] == "/" and not cookie["domain"]
-    headers = {"Cookie": f"{COOKIE}={cookie.value}", "Origin": ORIGIN}
-    login = await client.get("/login", headers=headers)
-    challenge = re.search(r"/抽奖 登录 ([0-9a-f-]+)", await login.text())[1]
-    assert (
-        await client.get("/panel", headers=headers, allow_redirects=False)
-    ).status == 303
-    assert "已验证本群身份" in await service.execute(actor, f"登录 {challenge}")
-    return headers
+    assert cookie["max-age"] == str(SESSION_TTL)
+    assert (await client.get(path)).status == 404
+    return {"Cookie": f"{COOKIE}={cookie.value}", "Origin": ORIGIN}
 
 
 def hidden(name, html):
@@ -72,25 +75,51 @@ def make_app(service, roles):
     )
 
 
-def test_web_challenge_one_time_and_revoke(raffle):
+def test_web_invite_expiration_replacement_and_session_revoke(raffle):
     service, _ = raffle
     auth = WebAuth(service.store)
-    browser = auth.start(NOW)
-    code = auth.challenge(browser, NOW)
-    assert auth.session(browser, NOW) is None
-    assert auth.session(auth.start(NOW), NOW) is None
-    with pytest.raises(RaffleError, match="无效"):
-        auth.approve(OWNER, code[:-1] + ("0" if code[-1] != "0" else "1"), NOW)
-    with pytest.raises(RaffleError, match="过期"):
-        auth.approve(OWNER, code, NOW + LOGIN_TTL)
-    auth.approve(OWNER, code, NOW)
+    first = auth.issue(OWNER, NOW, private=True)
+    assert auth.accept_private(first, NOW + INVITE_TTL) is None
+    second = auth.issue(OWNER, NOW, private=True)
+    third = auth.issue(OWNER, NOW, private=True)
+    assert auth.accept_private(second, NOW) is None
+    browser = auth.accept_private(third, NOW)
     assert auth.session(browser, NOW).qq == OWNER.qq
-    with pytest.raises(RaffleError, match="已使用"):
-        auth.approve(OTHER, code, NOW)
+    assert auth.session(browser, NOW + SESSION_TTL) is None
+    assert auth.accept_private(third, NOW) is None
     auth.logout(browser)
     assert auth.session(browser, NOW) is None
-    with pytest.raises(RaffleError, match="已使用"):
-        auth.approve(OWNER, code, NOW)
+
+
+@pytest.mark.asyncio
+async def test_public_invite_requires_the_original_qq_and_browser(raffle):
+    service, _ = raffle
+    auth = WebAuth(service.store)
+    private = auth.issue(OWNER, NOW, private=True)
+    shared = auth.issue(OWNER, NOW, private=False, replace=False)
+    roles = {(OWNER.group, OWNER.qq): OWNER}
+    path = "/a/" + shared
+    async with TestClient(TestServer(make_app(service, roles))) as client:
+        preview = await client.get(path)
+        assert preview.status == 200 and not preview.cookies
+        assert (
+            await client.post(path, headers={"Origin": "https://bad.example"})
+        ).status == 403
+        response = await client.post(path, headers={"Origin": ORIGIN})
+        cookie = response.cookies[COOKIE].value
+        code = re.search(r"/抽奖 访问 ([0-9a-f-]+)", await response.text())[1]
+        headers = {"Cookie": f"{COOKIE}={cookie}"}
+        assert (await client.get("/panel", headers=headers)).status == 403
+        for wrong in (OTHER, MEMBER):
+            with pytest.raises(RaffleError, match="原群领取"):
+                await service.execute(wrong, f"访问 {code}")
+        assert "已确认" in await service.execute(OWNER, f"访问 {code}")
+        assert (await client.get("/panel", headers=headers)).status == 200
+        assert (await client.get("/panel")).status == 403
+        assert (await client.get(path)).status == 404
+        assert auth.accept_private(private, NOW) is None
+        with pytest.raises(RaffleError, match="有效期"):
+            await service.execute(OWNER, f"访问 {code}")
 
 
 @pytest.mark.asyncio
@@ -98,15 +127,13 @@ async def test_dashboard_and_qq_use_same_records_and_permissions(raffle):
     service, clock = raffle
     store = service.store
     roles = {(actor.group, actor.qq): actor for actor in (OWNER, MEMBER, ADMIN, OTHER)}
-    other_number = store.create(OTHER, "其他群的奖品", 1, NOW + 3600, NOW)
+    other_number = store.create(OTHER, "其他群的奖品", 1, NOW + 900, NOW)
     async with TestClient(TestServer(make_app(service, roles))) as client:
-        assert "群抽奖管理台" in await (await client.get("/")).text()
+        assert (await client.get("/")).status == 403
         assert (await client.get("/assets/raffle.css")).content_type == "text/css"
         assert (await client.get("/api/plugin/get")).status == 404
-        assert (
-            await client.post("/login", headers={"Origin": "https://other.test"})
-        ).status == 403
-        assert (await client.get("/panel", allow_redirects=False)).status == 303
+        assert (await client.post("/login", headers={"Origin": ORIGIN})).status == 404
+        assert (await client.get("/panel", allow_redirects=False)).status == 403
 
         owner = await sign_in(client, service, OWNER)
         member = await sign_in(client, service, MEMBER)
@@ -124,7 +151,7 @@ async def test_dashboard_and_qq_use_same_records_and_permissions(raffle):
             allow_redirects=False,
         )
         assert draft.status == 303
-        deadline = datetime.fromtimestamp(NOW + 3600, ZONE).strftime("%Y-%m-%dT%H:%M")
+        deadline = datetime.fromtimestamp(NOW + 900, ZONE).strftime("%Y-%m-%dT%H:%M")
         saved = await client.post(
             draft.headers["Location"],
             headers=owner,
@@ -180,7 +207,7 @@ async def test_dashboard_and_qq_use_same_records_and_permissions(raffle):
             await client.post(path + "/draw", headers=owner, data={"csrf": owner_csrf})
         ).status == 409
 
-        clock.now += 3600
+        clock.now += 900
         admin_page = await (await client.get(path + "/draw", headers=admin)).text()
         assert "确认开奖" in admin_page
         assert (
@@ -207,7 +234,7 @@ async def test_dashboard_and_qq_use_same_records_and_permissions(raffle):
         assert logout.status == 303
         assert (
             await client.get(path, headers=owner, allow_redirects=False)
-        ).status == 303
+        ).status == 403
 
 
 @pytest.mark.asyncio
@@ -216,7 +243,7 @@ async def test_onebot_live_role_and_notice_receipts(raffle):
     store = service.store
     await service.execute(OWNER, "发起")
     token = store.new_form(OWNER, NOW)
-    store.save_form(token, "奖品", 1, NOW + 3600, NOW)
+    store.save_form(token, "奖品", 1, NOW + 900, NOW)
     code = store.form(token, NOW)["code"]
     number, *_ = store.confirm_form(OWNER, code, NOW, web=True)
     pending = store.pending_notices()[0]
@@ -245,8 +272,8 @@ async def test_onebot_live_role_and_notice_receipts(raffle):
         platform_manager=SimpleNamespace(platform_insts=[platform])
     )
     auth = WebAuth(store)
-    browser = auth.start(NOW)
-    auth.approve(OWNER, auth.challenge(browser, NOW), NOW)
+    token = auth.issue(OWNER, NOW, private=True)
+    browser = auth.accept_private(token, NOW)
     session = auth.session(browser, NOW)
     verified = await service.web_actor(session)
     assert verified.moderator and verified.qq == OWNER.qq

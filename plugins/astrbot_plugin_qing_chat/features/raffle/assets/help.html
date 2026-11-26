@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>群抽奖怎么用</title>
+<style>
+  * { box-sizing: border-box; }
+  :root { font-family: "PingFang SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif; color: #193b34; background: #ecf4ef; }
+  body { margin: 0; width: 720px; padding: 32px; }
+  h1, h2, p { margin: 0; }
+  .hero { background: #143e35; padding: 28px 30px; border-radius: 24px; color: #fff; }
+  .hero h1 { font-size: 52px; letter-spacing: 1px; line-height: 1.2; }
+  .hero p { color: #d5eee4; margin-top: 10px; font-size: 25px; }
+  .current { display: flex; align-items: center; gap: 18px; background: #d8eadf; border-radius: 15px; padding: 14px 20px; margin: 18px 0 22px; font-size: 24px; font-weight: 600; }
+  code { display: inline-block; font-family: inherit; font-weight: 700; white-space: nowrap; background: #e9f3ee; color: #125745; border-radius: 8px; padding: 3px 10px; }
+  .current code { background: #fff; }
+  .steps { position: relative; display: grid; gap: 16px; }
+  .steps::before { content: ""; position: absolute; left: 24px; top: 27px; bottom: 45px; width: 3px; background: #93b9a4; }
+  .step { position: relative; display: grid; grid-template-columns: 49px 1fr; align-items: start; gap: 15px; }
+  .num { margin-top: 16px; display: grid; place-items: center; width: 49px; height: 49px; border-radius: 50%; background: #205548; color: white; font-size: 25px; font-weight: 700; outline: 5px solid #ecf4ef; }
+  .card { border: 1px solid #d6e5dc; border-radius: 18px; background: #fff; padding: 17px 21px 18px; }
+  .top { display: flex; align-items: center; gap: 13px; margin-bottom: 7px; }
+  h2 { font-size: 30px; line-height: 1.2; }
+  .top code, .early code { font-size: 24px; }
+  .card p { font-size: 23px; line-height: 1.45; color: #344f47; }
+  .card p + p { margin-top: 3px; }
+  .card b { color: #193b34; }
+  .early { background: #fff2db; border-radius: 9px; padding: 6px 10px; margin-top: 9px !important; }
+  .early code { background: transparent; padding: 0; color: #6f4a11; }
+  .more { margin-top: 20px; background: #f9fcfa; border-radius: 14px; padding: 11px 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .more div { padding: 4px 6px; font-size: 20px; color: #344f47; }
+  .more code { font-size: 22px; }
+  .text { margin-top: 11px; color: #496958; padding-left: 5px; font-size: 20px; }
+</style>
+<main>
+  <header class="hero"><h1>群抽奖怎么用</h1><p>在 QQ 群里发这些指令</p></header>
+  <section class="current"><code>/抽奖</code><span>查看本群正在报名的场次</span></section>
+  <section class="steps">
+    <article class="step">
+      <span class="num">1</span>
+      <div class="card">
+        <div class="top"><h2>发起</h2><code>/抽奖 发起</code></div>
+        <p>打开链接，填奖品、中奖人数和截止时间。</p>
+        <p>把页面生成的确认指令发回原群，即可发布。</p>
+      </div>
+    </article>
+    <article class="step">
+      <span class="num">2</span>
+      <div class="card">
+        <div class="top"><h2>报名</h2><code>/抽奖 报名</code></div>
+        <p><b>一场</b>　直接报名</p>
+        <p><b>多场</b>　2 分钟内新发一条数字消息，比如 <b>12</b></p>
+        <p>直接发数字，别引用回复或 @ 机器人。</p>
+      </div>
+    </article>
+    <article class="step">
+      <span class="num">3</span>
+      <div class="card">
+        <div class="top"><h2>开奖</h2><code>/抽奖 开奖</code></div>
+        <p>发起人开奖，有多场时按提示加场次编号。</p>
+        <p class="early"><b>提前开</b>　按提示在 2 分钟内发 <code>/抽奖 确认</code></p>
+      </div>
+    </article>
+  </section>
+  <section class="more">
+    <div><code>/抽奖管理</code>　网页入口</div>
+    <div><code>/抽奖 结果 12</code>　查结果</div>
+  </section>
+  <p class="text">完整文字版　/抽奖 帮助 文字</p>
+</main>
+</html>

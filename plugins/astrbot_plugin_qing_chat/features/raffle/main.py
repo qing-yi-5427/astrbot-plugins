@@ -28,8 +28,10 @@ from .store import (
 )
 from .web_auth import INVITE_TTL, WebAuth
 
+HELP_CARD = Path(__file__).with_name("assets") / "help.png"
 HELP = (
     "【QQ群抽奖使用说明】\n\n"
+    "发 /抽奖，查看本群正在报名的场次。\n\n"
     "① 发起｜发 /抽奖 发起，打开链接填奖品、中奖人数和截止时间（北京时间）。"
     "表单 15 分钟内有效。填好后把页面上的 /抽奖 确认 指令发回原群，"
     "或登录网页管理台发布。发布后群友才能报名。\n\n"
@@ -43,12 +45,13 @@ HELP = (
     "公布抽中的号码，并 @ 开奖人和获奖人。群主和群管理员也可指定编号开奖。"
     "重复开奖只显示原结果。\n\n"
     "④ 查询与管理\n"
+    "/抽奖 进行中 [页码] · 查看可报名的场次\n"
     "/抽奖 列表 [页码] · 查看报名中和待开奖的场次\n"
     "/抽奖 名单 编号 [页码] · 查报名序号和昵称\n"
     "/抽奖 历史 [页码] · 查已结束的场次\n"
     "/抽奖 结果 编号 [页码] · 查原开奖结果\n"
     "/抽奖 取消 编号 · 发起人或群管理取消\n"
-    "/抽奖 或 /抽奖 管理 · 领取 5 分钟有效的网页入口，优先私发。"
+    "/抽奖管理 · 领取 5 分钟有效的网页入口，优先私发。"
     "收到群内入口时，按页面提示在原群确认\n"
     "/抽奖 同步状态 · 查看腾讯文档同步进度\n\n"
     "报名截止时会 @ 发起人；离截止超过 1 小时发起的场次还有一次提前提醒。"
@@ -62,6 +65,7 @@ ACTIONS = {
     "访问",
     "确认",
     "报名",
+    "进行中",
     "列表",
     "名单",
     "开奖",
@@ -112,7 +116,9 @@ def mention_command(event):
     if not at_bot or not tokens:
         return None
     if tokens[0] == "抽奖":
-        return tokens[1] if len(tokens) > 1 else "管理"
+        return tokens[1] if len(tokens) > 1 else ""
+    if command == "抽奖管理":
+        return "管理"
     return command if tokens[0] in ACTIONS else None
 
 
@@ -316,9 +322,12 @@ class RaffleService(FeatureService):
             group, qq, nickname if nickname and nickname != qq else "群友", moderator
         )
         event.should_call_llm(False)
+        command = command.strip()
         try:
-            if command.strip() in {"", "管理"}:
+            if command == "管理":
                 reply = await self.send_access(event, actor)
+            elif command == "帮助" and HELP_CARD.is_file():
+                reply = MessageChain(use_t2i_=False).file_image(str(HELP_CARD))
             else:
                 reply = await self.execute(actor, command, with_mentions=True)
         except RaffleError as exc:
@@ -326,11 +335,14 @@ class RaffleService(FeatureService):
         except Exception as exc:
             self.logger.error("群抽奖记录操作异常 (%s)", type(exc).__name__)
             reply = "抽奖记录处理异常，请稍后查询状态。"
-        messages = (
-            self.draw_messages(reply.raffle, reply.drawer)
-            if isinstance(reply, DrawReply)
-            else (MessageChain(use_t2i_=False, use_markdown_=False).message(reply),)
-        )
+        if isinstance(reply, DrawReply):
+            messages = self.draw_messages(reply.raffle, reply.drawer)
+        elif isinstance(reply, MessageChain):
+            messages = (reply,)
+        else:
+            messages = (
+                MessageChain(use_t2i_=False, use_markdown_=False).message(reply),
+            )
         try:
             for message in messages:
                 try:
@@ -381,15 +393,15 @@ class RaffleService(FeatureService):
         )
 
     async def execute(self, actor, command, *, with_mentions=False):
-        parts = (command.strip() or "帮助").split(maxsplit=4)
+        parts = (command.strip() or "进行中").split(maxsplit=4)
         action, *args = parts
         now = int(time.time())
         if action == "帮助" or action not in ACTIONS:
             return HELP
         if action == "管理" and not args:
-            return "在原 QQ 群发 /抽奖 领取管理入口。"
+            return "在原 QQ 群发 /抽奖管理 领取管理入口。"
         if action == "登录":
-            return "网页入口已改为限时链接。在本群发 /抽奖 领取。"
+            return "网页入口已改为限时链接。在本群发 /抽奖管理 领取。"
         if action == "访问" and len(args) == 1 and self.form_url:
             await asyncio.to_thread(
                 WebAuth(self.store).approve_shared, actor, args[0], now
@@ -429,23 +441,42 @@ class RaffleService(FeatureService):
                 group, "本群未绑定文档，记录保存在本地"
             )
             return "腾讯文档同步：" + state
-        if action in ("列表", "历史") and len(args) <= 1:
+        if action in ("进行中", "列表", "历史") and len(args) <= 1:
             page = number(args[0]) if args else 1
+            open_only = action == "进行中"
             rows = await asyncio.to_thread(
-                self.store.list_raffles, actor.group, page, action == "历史"
+                self.store.list_raffles,
+                actor.group,
+                page,
+                action == "历史",
+                active_at=now if open_only else None,
             )
-            lines = [f"抽奖{action} · 第 {page} 页"]
+            if open_only:
+                lines = [
+                    f"【正在报名的抽奖】第 {page} 页"
+                    if page > 1
+                    else "【正在报名的抽奖】"
+                ]
+            else:
+                lines = [f"抽奖{action} · 第 {page} 页"]
             for row in rows[:PAGE_SIZE]:
                 status = (
                     "待开奖"
                     if row["status"] == "open" and now >= row["deadline"]
                     else STATUSES[row["status"]]
                 )
+                label = "" if open_only else f"{status}｜"
                 lines.append(
-                    f"#{row['id']} {row['title']}｜{status}｜{row['people']} 人｜{display_time(row['deadline'])} 截止"
+                    f"#{row['id']} {row['title']}｜{label}{row['people']} 人｜{display_time(row['deadline'])} 截止"
                 )
             if not rows:
-                lines.append("这一页没有记录。")
+                lines.append(
+                    "本群当前没有可报名的抽奖。"
+                    if open_only and page == 1
+                    else "这一页没有记录。"
+                )
+            elif open_only:
+                lines.append("报名：/抽奖 报名")
             return self.paginate(lines, rows, f"/抽奖 {action}", page)
         if action in ("名单", "结果") and 1 <= len(args) <= 2:
             raffle_id = number(args[0])
@@ -504,7 +535,7 @@ class RaffleService(FeatureService):
         lines = ["本群有多场抽奖正在报名："]
         lines.extend(f"{r['id']} · {r['title'][:48]}" for r in rows[:PAGE_SIZE])
         if len(rows) > PAGE_SIZE:
-            lines.append(f"共 {len(rows)} 场，其余用 /抽奖 列表 2 或在管理台查看。")
+            lines.append(f"共 {len(rows)} 场，其余用 /抽奖 进行中 2 或在管理台查看。")
         lines.append(
             "请在 2 分钟内直接发对应数字，不要回复或 @ 机器人。也可以发 /抽奖 报名 编号。"
         )

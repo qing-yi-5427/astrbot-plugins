@@ -495,8 +495,8 @@ async def test_help_and_new_raffle_binding(storage):
     service = RaffleService(None, {"require_document": True})
     service.store = storage
     service.form_url = "https://raffle.example.test"
-    event = group_event(OWNER.qq, "/抽奖 帮助")
-    await service.handle(event, "帮助")
+    event = group_event(OWNER.qq, "/抽奖 帮助 文字")
+    await service.handle(event, "帮助 文字")
     text = event.send.await_args.args[0].get_plain_text()
     assert all(
         item in text
@@ -531,9 +531,9 @@ async def test_private_send_failure_shares_only_confirmation_link(storage, monke
     service = RaffleService(None, {})
     service.store = storage
     service.form_url = "https://raffle.example.test"
-    event = group_event(OWNER.qq, "/抽奖")
+    event = group_event(OWNER.qq, "/抽奖管理")
     event.bot = SimpleNamespace(call_action=AsyncMock(side_effect=TimeoutError()))
-    await service.handle(event, "")
+    await service.handle(event, "管理")
     direct = event.bot.call_action.await_args.kwargs["message"][0]["data"]["text"]
     shared = event.send.await_args.args[0].get_plain_text()
     private_token = direct.rsplit("/", 1)[-1]
@@ -578,3 +578,31 @@ async def test_early_draw_explicit_confirmation_and_publish_message(
     assert "已经开过奖" in await service.execute(OWNER, "开奖 1")
     assert storage.due(NOW + 7200) == []
     assert len([row for row in storage.unsynced(0) if row["kind"] == "开奖"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_current_list_shows_only_open_local_qq_raffles(storage, monkeypatch):
+    from astrbot_plugin_qing_chat.features.raffle import main
+
+    monkeypatch.setattr(main, "time", SimpleNamespace(time=lambda: NOW))
+    service = RaffleService(None, {})
+    service.store = storage
+    assert "没有可报名" in await service.execute(OWNER, "")
+    storage.create(OWNER, "截止时刻已到", 1, NOW, NOW - 60)
+    cancelled = storage.create(OWNER, "已取消场次", 1, NOW + 120, NOW)
+    storage.close(OWNER, cancelled, NOW, cancel=True)
+    other = Actor("default:GroupMessage:456", OWNER.qq, OWNER.name)
+    storage.create(other, "另一个群的场次", 1, NOW + 120, NOW)
+    first = storage.create(OWNER, "本群可报名", 1, NOW + 120, NOW)
+    storage.join(GUEST, first, NOW)
+    assert await service.execute(OWNER, "") == await service.execute(OWNER, "进行中")
+    default = await service.execute(OWNER, "")
+    assert f"#{first} 本群可报名｜1 人" in default
+    assert "截止时刻已到" not in default and "另一个群的场次" not in default
+    assert "已取消场次" not in default and "报名：/抽奖 报名" in default
+    assert "待开奖" in await service.execute(OWNER, "列表")
+    for id in range(20):
+        storage.create(OWNER, f"其他可报名 {id}", 1, NOW + 120, NOW)
+    assert "下一页：/抽奖 进行中 2" in await service.execute(OWNER, "")
+    page = await service.execute(OWNER, "进行中 2")
+    assert "第 2 页" in page and "本群可报名" in page

@@ -141,7 +141,7 @@ def locked():
     return page(
         "需要机器人发来的链接",
         '<section class="intro"><h1>群抽奖管理台</h1>'
-        "<p>在 QQ 群发 <strong>/抽奖</strong>，用机器人发来的限时链接进入。</p></section>",
+        "<p>在 QQ 群发 <strong>/抽奖管理</strong>，用机器人发来的限时链接进入。</p></section>",
         status=403,
     )
 
@@ -150,7 +150,7 @@ def invite_invalid():
     return page(
         "链接已失效",
         '<section class="intro"><h1>链接已失效</h1>'
-        "<p>如果已开启网页会话，可回到管理台。需要新链接时，在原群发 /抽奖。</p>"
+        "<p>如果已开启网页会话，可回到管理台。需要新链接时，在原群发 /抽奖管理。</p>"
         '<a class="button" href="/panel">返回管理台</a></section>',
         status=404,
     )

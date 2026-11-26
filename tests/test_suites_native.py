@@ -452,7 +452,7 @@ def qq_event(text, parts, raw_parts=None):
 async def test_qq_raffle_command_and_mention_use_same_store():
     from datetime import datetime, timedelta
 
-    from astrbot.api.message_components import At, Plain
+    from astrbot.api.message_components import At, Image, Plain
     from astrbot.core.star.filter.command import CommandFilter
     from astrbot_plugin_qing_chat.features.raffle.store import ZONE
 
@@ -498,12 +498,33 @@ async def test_qq_raffle_command_and_mention_use_same_store():
 
         raffle = suite.modules.services["raffle"]
         raffle.form_url = "https://raffle.example.test"
-        access = qq_event("抽奖", [Plain("抽奖")])
-        assert command_filter.filter(access, {})
-        assert access.get_extra("parsed_params") == {"command": ""}
+        current = qq_event("抽奖", [Plain("抽奖")])
+        assert command_filter.filter(current, {})
+        assert current.get_extra("parsed_params") == {"command": ""}
+        current.send = AsyncMock()
+        await suite.raffle_command(current, **current.get_extra("parsed_params"))
+        assert "正在报名的抽奖" in current.send.await_args.args[0].get_plain_text()
+        assert "测试礼物" in current.send.await_args.args[0].get_plain_text()
+        current.bot.call_action.assert_not_awaited()
+
+        help_event = qq_event("抽奖 帮助", [Plain("抽奖 帮助")])
+        help_event.send = AsyncMock()
+        await suite.raffle_command(help_event, "帮助")
+        help_event.send.assert_awaited_once()
+        components = help_event.send.await_args.args[0].chain
+        assert len(components) == 1 and isinstance(components[0], Image)
+
+        access = qq_event("抽奖管理", [Plain("抽奖管理")])
+        assert not command_filter.filter(access, {})
+        manage = next(
+            h for h in hooks
+            if h.handler_module_path == chat.__name__ and h.handler_name == "raffle_manage_command"
+        )
+        manage_filter = next(f for f in manage.event_filters if isinstance(f, CommandFilter))
+        assert manage_filter.filter(access, {})
         access.bot.call_action.return_value = {"message_id": 123}
         access.send = AsyncMock()
-        await suite.raffle_command(access, **access.get_extra("parsed_params"))
+        await suite.raffle_manage_command(access)
         private = access.bot.call_action.await_args
         assert private.args == ("send_private_msg",)
         assert "/a/" in private.kwargs["message"][0]["data"]["text"]

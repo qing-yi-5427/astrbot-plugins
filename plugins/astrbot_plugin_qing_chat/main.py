@@ -34,7 +34,7 @@ LEGACY_IDS = {
 TOOL_NAME = "astrbot_generate_image"
 
 
-@register("astrbot_plugin_qing_chat", "qingyi", "对话管理", "1.6.0")
+@register("astrbot_plugin_qing_chat", "qingyi", "对话管理", "1.7.0")
 class Main(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context, config)
@@ -72,6 +72,12 @@ class Main(Star):
             "raffle", event
         ):
             await self.modules.call("raffle", "handle", event, command)
+
+    @safe_filter(filter.command("抽奖管理"), LEGACY.values())
+    async def raffle_manage_command(self, event: AstrMessageEvent):
+        """领取 QQ 群抽奖管理台的限时入口。"""
+        if RaffleService.in_group(event) and await self.modules.allowed("raffle", event):
+            await self.modules.call("raffle", "handle", event, "管理")
 
     @safe_filter(
         filter.custom_filter(RaffleFollowup, priority=100),

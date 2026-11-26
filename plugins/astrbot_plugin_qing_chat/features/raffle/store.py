@@ -436,13 +436,22 @@ class Store:
                 detail={"类型": raffle["kind"]},
             )
 
-    def list_raffles(self, group, page, history):
+    def list_raffles(self, group, page, history, *, active_at=None):
         statuses = ("drawn", "cancelled") if history else ("open", "closed")
         with self.transaction() as db:
             return db.execute(
                 """SELECT r.*, (SELECT count(*) FROM entrants WHERE raffle=r.id) AS people
-                FROM raffles r WHERE scope=? AND status IN (?,?) ORDER BY id DESC LIMIT ? OFFSET ?""",
-                (group, *statuses, PAGE_SIZE + 1, PAGE_SIZE * (page - 1)),
+                FROM raffles r WHERE scope=? AND status IN (?,?)
+                AND (? IS NULL OR (status='open' AND deadline>?))
+                ORDER BY id DESC LIMIT ? OFFSET ?""",
+                (
+                    group,
+                    *statuses,
+                    active_at,
+                    active_at,
+                    PAGE_SIZE + 1,
+                    PAGE_SIZE * (page - 1),
+                ),
             ).fetchall()
 
     def open_for_join(self, scope, now):

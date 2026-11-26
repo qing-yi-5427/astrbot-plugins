@@ -149,11 +149,17 @@ class SuiteRuntime:
                     else factory(self.owner.context)
                 )
                 service.config = config
-                metadata = self.owner.context.get_registered_star(self.legacy[section])
-                legacy_id = (
-                    getattr(metadata, "plugin_id", None) or self.legacy_ids[section]
+                legacy_name = self.legacy.get(section)
+                metadata = (
+                    self.owner.context.get_registered_star(legacy_name)
+                    if legacy_name
+                    else None
                 )
-                self.legacy_ids[section] = legacy_id
+                legacy_id = getattr(metadata, "plugin_id", None) or self.legacy_ids.get(
+                    section
+                )
+                if legacy_id:
+                    self.legacy_ids[section] = legacy_id
                 service.bind_suite(self, section, legacy_id)
                 self.services[section] = service
                 await service.initialize()
@@ -193,6 +199,7 @@ class SuiteRuntime:
         config = self.owner.config.get(section, {})
         if not isinstance(config, dict) or config.get("enabled", True) is not True:
             return False
+        legacy_name = self.legacy.get(section)
         session = (
             event
             if isinstance(event, str)
@@ -211,14 +218,15 @@ class SuiteRuntime:
             # different old modules to remain individually selected. A new list
             # containing only the suite opts into its configured module switches.
             if (
-                set(selected).intersection(self.legacy.values())
-                and self.legacy[section] not in selected
+                legacy_name
+                and set(selected).intersection(self.legacy.values())
+                and legacy_name not in selected
             ):
                 return False
         if session:
             from astrbot.core.star.session_plugin_manager import SessionPluginManager
 
-            for name in (self.name, self.legacy[section]):
+            for name in (self.name, legacy_name) if legacy_name else (self.name,):
                 if not await SessionPluginManager.is_plugin_enabled_for_session(
                     session, name
                 ):

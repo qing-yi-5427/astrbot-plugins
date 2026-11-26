@@ -5,6 +5,7 @@ from astrbot.api import AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
+from astrbot.core.star.filter.command import GreedyStr
 from .runtime import SuiteRuntime, safe_filter
 from .features.mention.main import MentionLLMPlugin as MentionService
 from .features.reaction.main import Main as ReactionService
@@ -12,6 +13,7 @@ from .features.conversation.main import TavilyResultLimiter as ConversationServi
 from .features.context_images.main import ContextImageLimiter as ContextImagesService
 from .features.memory_compat.main import MemoryRecallFix as MemoryCompatService
 from .features.roll.main import RollPlugin as RollService
+from .features.raffle.main import RaffleService, mention_command
 
 LEGACY = {
     "mention": "astrbot_plugin_mention_llm",
@@ -32,7 +34,7 @@ LEGACY_IDS = {
 TOOL_NAME = "astrbot_generate_image"
 
 
-@register("astrbot_plugin_qing_chat", "qingyi", "对话管理", "1.0.0")
+@register("astrbot_plugin_qing_chat", "qingyi", "对话管理", "1.1.0")
 class Main(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context, config)
@@ -49,6 +51,7 @@ class Main(Star):
                 "context_images": (ContextImagesService, True),
                 "memory_compat": (MemoryCompatService, True),
                 "roll": (RollService, False),
+                "raffle": (RaffleService, True),
             },
         )
 
@@ -61,6 +64,29 @@ class Main(Star):
 
     async def terminate(self):
         await self.modules.terminate()
+
+    @safe_filter(filter.command("抽奖", alias={"raffle"}), LEGACY.values())
+    async def raffle_command(self, event: AstrMessageEvent, command: GreedyStr):
+        """群内发起、报名、开奖、取消或查询抽奖。"""
+        if RaffleService.in_group(event) and await self.modules.allowed(
+            "raffle", event
+        ):
+            result = await self.modules.call("raffle", "handle", event, command)
+            if result is not None:
+                yield result
+
+    @safe_filter(
+        filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=100),
+        LEGACY.values(),
+    )
+    async def raffle_mention(self, event: AstrMessageEvent):
+        if not RaffleService.in_group(event):
+            return
+        command = mention_command(event)
+        if command is not None and await self.modules.allowed("raffle", event):
+            result = await self.modules.call("raffle", "handle", event, command)
+            if result is not None:
+                yield result
 
     @safe_filter(filter.on_waiting_llm_request(), LEGACY.values())
     async def mention_mark_explicit_mention(self, event: AstrMessageEvent):

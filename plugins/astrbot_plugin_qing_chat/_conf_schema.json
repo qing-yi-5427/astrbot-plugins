@@ -204,5 +204,28 @@
         "default": true
       }
     }
+  },
+  "raffle": {
+    "description": "QQ 群抽奖",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用此功能模块",
+        "type": "bool",
+        "default": true
+      },
+      "document_url": {
+        "description": "腾讯文档在线表格链接",
+        "type": "string",
+        "default": "",
+        "hint": "同步时在同一份文档新建抽奖流水标签页。"
+      },
+      "mcp_server": {
+        "description": "AstrBot 里的腾讯文档 MCP 服务名称",
+        "type": "string",
+        "default": "tencent-docs-sheet",
+        "hint": "在 AstrBot 的 MCP 管理中启用该服务。插件复用这条连接，授权在 MCP 服务中配置。"
+      }
+    }
   }
 }

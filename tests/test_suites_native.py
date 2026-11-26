@@ -158,7 +158,7 @@ def test_command_facade_keeps_admin_permissions_and_greedy_parser():
     assert not permission.filter(real_event("t2i use genshin", admin=False), {})
 
 
-@pytest.mark.parametrize("module,sections", [(chat, 6), (media, 3)])
+@pytest.mark.parametrize("module,sections", [(chat, 7), (media, 3)])
 def test_visual_settings_schema_has_sections_and_module_switches(module, sections):
     schema = json.loads(
         (Path(module.__file__).parent / "_conf_schema.json").read_text()
@@ -179,7 +179,7 @@ async def test_native_lifecycle_all_nine_features_and_idempotent_reload():
         for _ in range(2):
             await a.initialize()
             await b.initialize()
-            assert len(a.modules.services) == 6, a.modules.errors
+            assert len(a.modules.services) == 7, a.modules.errors
             assert len(b.modules.services) == 3, b.modules.errors
             assert not a.modules.errors and not b.modules.errors
             installed = patch_points()
@@ -220,7 +220,7 @@ async def test_legacy_conflict_is_dormant_without_installing_wrappers():
     c.metadata.clear()
     try:
         await a.initialize()
-        assert len(a.modules.services) == 6
+        assert len(a.modules.services) == 7
     finally:
         await a.terminate()
 
@@ -446,6 +446,57 @@ def qq_event(text, parts, raw_parts=None):
     e.is_at_or_wake_command = True
     e.send = AsyncMock(side_effect=AssertionError("No real QQ test sends"))
     return e
+
+
+@pytest.mark.asyncio
+async def test_qq_raffle_command_and_mention_use_same_store():
+    from datetime import datetime, timedelta
+
+    from astrbot.api.message_components import At, Plain
+    from astrbot.core.star.filter.command import CommandFilter
+    from astrbot_plugin_qing_chat.features.raffle.store import ZONE
+
+    suite = chat.Main(Context(), config_for(chat))
+    deadline = (datetime.now(ZONE) + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+    command = f"发起 1 {deadline} 测试礼物"
+    event = qq_event("抽奖 " + command, [Plain("抽奖 " + command)])
+    hooks = star_handlers_registry.get_handlers_by_event_type(
+        EventType.AdapterMessageEvent, only_activated=False
+    )
+    hook = next(
+        h
+        for h in hooks
+        if h.handler_module_path == chat.__name__ and h.handler_name == "raffle_command"
+    )
+    command_filter = next(f for f in hook.event_filters if isinstance(f, CommandFilter))
+    assert command_filter.filter(event, {})
+    assert event.get_extra("parsed_params") == {"command": command}
+    try:
+        await suite.initialize()
+        replies = [
+            reply
+            async for reply in suite.raffle_command(
+                event, **event.get_extra("parsed_params")
+            )
+        ]
+        assert "抽奖 #1 已发起" in replies[0].get_plain_text() and event.is_stopped()
+        raw = [
+            {"type": "at", "data": {"qq": "456"}},
+            {"type": "text", "data": {"text": "报名 1"}},
+        ]
+        event = qq_event("报名 1", [At(qq="456"), Plain("报名 1")], raw)
+        replies = [reply async for reply in suite.raffle_mention(event)]
+        assert replies[0].get_plain_text() == "报名成功。抽奖 #1，你的报名序号是 1。"
+        assert event.is_stopped()
+        normal = qq_event(
+            "你好",
+            [At(qq="456"), Plain("你好")],
+            [raw[0], {"type": "text", "data": {"text": "你好"}}],
+        )
+        assert [reply async for reply in suite.raffle_mention(normal)] == []
+        assert not normal.is_stopped()
+    finally:
+        await suite.terminate()
 
 
 @pytest.mark.asyncio

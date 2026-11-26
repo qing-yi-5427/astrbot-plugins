@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 ZONE = ZoneInfo("Asia/Shanghai")
 PAGE_SIZE = 20
+DRAFT_TTL = 15 * 60
 
 
 def display_time(timestamp):
@@ -21,6 +22,25 @@ def display_time(timestamp):
 
 class RaffleError(ValueError):
     pass
+
+
+def validate_details(title, slots, when, now):
+    title = " ".join(title.split())
+    if not 1 <= len(title) <= 120:
+        raise RaffleError("请输入 1–120 字的奖品描述。")
+    if not 1 <= slots <= 999_999_999:
+        raise RaffleError("中奖人数必须为正整数。")
+    try:
+        deadline = int(
+            datetime.strptime(when.replace("T", " "), "%Y-%m-%d %H:%M")
+            .replace(tzinfo=ZONE)
+            .timestamp()
+        )
+    except (ValueError, OverflowError) as exc:
+        raise RaffleError("请填写有效的截止时间（北京时间）。") from exc
+    if deadline <= now:
+        raise RaffleError("截止时间必须晚于现在。")
+    return title, slots, deadline
 
 
 @dataclass(frozen=True)
@@ -70,6 +90,10 @@ class Store:
                 id INTEGER PRIMARY KEY, scope TEXT NOT NULL, raffle INTEGER NOT NULL,
                 at INTEGER NOT NULL, kind TEXT NOT NULL, qq TEXT NOT NULL,
                 name TEXT NOT NULL, detail TEXT NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS form_drafts (
+                token_hash TEXT PRIMARY KEY, scope TEXT NOT NULL, qq TEXT NOT NULL,
+                code TEXT NOT NULL, expires INTEGER NOT NULL, title TEXT,
+                slots INTEGER, deadline INTEGER, UNIQUE(scope, qq))""")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS reminders_due ON reminders(status, due)"
             )
@@ -123,30 +147,100 @@ class Store:
 
     def create(self, who, title, slots, deadline, now):
         with self.transaction(write=True) as db:
-            number = db.execute(
-                "INSERT INTO raffles (scope,title,owner,deadline,slots) VALUES (?,?,?,?,?)",
-                (who.group, title, who.qq, deadline, slots),
-            ).lastrowid
-            raffle = self.get(db, who.group, number)
-            self.record(
-                db,
-                raffle,
-                now,
-                "发起",
-                who.qq,
-                who.name,
-                {"奖品": title, "中奖人数": slots, "截止时间": display_time(deadline)},
-            )
+            return self._create(db, who, title, slots, deadline, now)
+
+    def _create(self, db, who, title, slots, deadline, now):
+        number = db.execute(
+            "INSERT INTO raffles (scope,title,owner,deadline,slots) VALUES (?,?,?,?,?)",
+            (who.group, title, who.qq, deadline, slots),
+        ).lastrowid
+        raffle = self.get(db, who.group, number)
+        self.record(
+            db,
+            raffle,
+            now,
+            "发起",
+            who.qq,
+            who.name,
+            {"奖品": title, "中奖人数": slots, "截止时间": display_time(deadline)},
+        )
+        db.execute(
+            "INSERT INTO reminders (raffle,kind,due) VALUES (?,?,?)",
+            (number, "截止", deadline),
+        )
+        if deadline - now > 3600:
             db.execute(
                 "INSERT INTO reminders (raffle,kind,due) VALUES (?,?,?)",
-                (number, "截止", deadline),
+                (number, "提前一小时", deadline - 3600),
             )
-            if deadline - now > 3600:
-                db.execute(
-                    "INSERT INTO reminders (raffle,kind,due) VALUES (?,?,?)",
-                    (number, "提前一小时", deadline - 3600),
+        return number
+
+    def new_form(self, who, now):
+        token = secrets.token_urlsafe(32)
+        with self.transaction(write=True) as db:
+            db.execute(
+                "DELETE FROM form_drafts WHERE expires<=? OR (scope=? AND qq=?)",
+                (now, who.group, who.qq),
+            )
+            db.execute(
+                "INSERT INTO form_drafts (token_hash,scope,qq,code,expires) VALUES (?,?,?,?,?)",
+                (
+                    self._form_hash(token),
+                    who.group,
+                    who.qq,
+                    secrets.token_hex(4).upper(),
+                    now + DRAFT_TTL,
+                ),
+            )
+        return token
+
+    @staticmethod
+    def _form_hash(token):
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def form(self, token, now):
+        with self.transaction() as db:
+            return db.execute(
+                "SELECT code,title,slots,deadline FROM form_drafts WHERE token_hash=? AND expires>?",
+                (self._form_hash(token), now),
+            ).fetchone()
+
+    def save_form(self, token, title, slots, deadline, now):
+        with self.transaction(write=True) as db:
+            row = db.execute(
+                "SELECT code,title FROM form_drafts WHERE token_hash=? AND expires>?",
+                (self._form_hash(token), now),
+            ).fetchone()
+            if row is None:
+                raise RaffleError("表单已失效，请回 QQ 重新发起。")
+            if row["title"] is not None:
+                return False
+            db.execute(
+                "UPDATE form_drafts SET title=?,slots=?,deadline=? WHERE token_hash=?",
+                (title, slots, deadline, self._form_hash(token)),
+            )
+            return True
+
+    def confirm_form(self, who, code, now):
+        with self.transaction(write=True) as db:
+            row = db.execute(
+                """SELECT * FROM form_drafts WHERE scope=? AND qq=? AND code=?
+                             AND expires>? AND title IS NOT NULL""",
+                (who.group, who.qq, code, now),
+            ).fetchone()
+            if row is None:
+                raise RaffleError(
+                    "找不到可确认的表单。请由发起人在原群发送表单里的确认指令。"
                 )
-            return number
+            if row["deadline"] <= now:
+                raise RaffleError("截止时间已过，请重新发起。")
+            raffle = self._create(
+                db, who, row["title"], row["slots"], row["deadline"], now
+            )
+            db.execute(
+                "DELETE FROM form_drafts WHERE token_hash=?", (row["token_hash"],)
+            )
+            return raffle, row["title"], row["slots"], row["deadline"]
 
     def join(self, who, number, now):
         with self.transaction(write=True) as db:

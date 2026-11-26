@@ -1,1 +1,2 @@
-# AstrBot APIs and Python standard library only.
+# Also used by AstrBot. The optional mobile form uses its web server.
+aiohttp>=3.11.18,<4

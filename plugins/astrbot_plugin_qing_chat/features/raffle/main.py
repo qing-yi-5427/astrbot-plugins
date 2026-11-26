@@ -5,17 +5,19 @@ import json
 import re
 import time
 from collections.abc import Mapping
-from datetime import datetime
 from pathlib import Path
 
+from aiohttp import web
 from astrbot.api.star import StarTools
 
 from ...runtime import FeatureService
 from .cloud import AstrBotSheetTools, CloudLedger, MCPUnavailable, group_documents
-from .store import Actor, PAGE_SIZE, RaffleError, Store, ZONE, display_time
+from .form import FORM_PORT, create_app, form_origin
+from .store import Actor, PAGE_SIZE, RaffleError, Store, display_time, validate_details
 
 HELP = (
     "群抽奖（北京时间）\n"
+    "/抽奖 发起 · 打开发起表单（需启用表单地址）\n"
     "/抽奖 发起 中奖人数 YYYY-MM-DD HH:MM 奖品描述\n"
     "例：/抽奖 发起 2 2026-12-01 21:00 Steam 礼物\n"
     "/抽奖 列表 [页] · /抽奖 报名 编号 · /抽奖 名单 编号 [页]\n"
@@ -26,6 +28,7 @@ HELP = (
 ACTIONS = {
     "帮助",
     "发起",
+    "确认",
     "报名",
     "列表",
     "名单",
@@ -85,6 +88,8 @@ class RaffleService(FeatureService):
         self.tasks = []
         self.sync_states = {}
         self.binding_error = ""
+        self.form_url = ""
+        self.form_runner = None
 
     async def initialize(self):
         directory = Path(StarTools.get_data_dir("astrbot_plugin_qing_chat")) / "raffle"
@@ -92,6 +97,7 @@ class RaffleService(FeatureService):
         self.store = Store(directory / "raffles.sqlite3")
         await asyncio.to_thread(self.store.initialize)
         self.store.path.chmod(0o600)
+        await self.start_form()
         server = self.config.get("mcp_server", "tencent-docs-sheet").strip()
         try:
             bindings = group_documents(self.config.get("group_documents", []))
@@ -111,7 +117,32 @@ class RaffleService(FeatureService):
             self.binding_error or f"已绑定 {len(self.sync_states)} 个群",
         )
 
+    async def start_form(self):
+        url = self.config.get("form_url", "").strip()
+        if not url:
+            return
+        runner = None
+        try:
+            origin = form_origin(url)
+            runner = web.AppRunner(create_app(self.store, origin), access_log=None)
+            await runner.setup()
+            await web.TCPSite(runner, "0.0.0.0", FORM_PORT).start()
+        except Exception as exc:
+            if runner is not None:
+                await runner.cleanup()
+            self.logger.warning(
+                "群抽奖表单启动失败 (%s)，可继续使用文字指令", type(exc).__name__
+            )
+            return
+        self.form_runner = runner
+        self.form_url = origin
+        self.logger.info("群抽奖表单已启动，监听端口 %s", FORM_PORT)
+
     async def terminate(self):
+        self.form_url = ""
+        if self.form_runner is not None:
+            await self.form_runner.cleanup()
+            self.form_runner = None
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
@@ -158,31 +189,26 @@ class RaffleService(FeatureService):
         if action == "帮助" or action not in ACTIONS:
             return HELP
         if action == "发起":
+            if not args and self.form_url:
+                token = await asyncio.to_thread(self.store.new_form, actor, now)
+                return f"打开表单填写奖品、人数和截止时间（链接 15 分钟有效）：\n{self.form_url}/f/{token}\n填完后复制确认指令，回本群发布。"
             if len(args) != 4:
                 return HELP
-            slots = number(args[0])
-            try:
-                deadline = int(
-                    datetime.strptime(f"{args[1]} {args[2]}", "%Y-%m-%d %H:%M")
-                    .replace(tzinfo=ZONE)
-                    .timestamp()
-                )
-            except (ValueError, OverflowError) as exc:
-                raise RaffleError("请用 YYYY-MM-DD HH:MM 填写有效的北京时间。") from exc
-            if deadline <= now:
-                raise RaffleError("截止时间必须晚于现在。")
-            title = " ".join(args[3].split())
-            if len(title) > 120:
-                raise RaffleError("奖品描述最多 120 字。")
+            title, slots, deadline = validate_details(
+                args[3], number(args[0]), f"{args[1]} {args[2]}", now
+            )
             raffle = await asyncio.to_thread(
                 self.store.create, actor, title, slots, deadline, now
             )
-            reminder = (
-                "截止前一小时和截止时会提醒发起人。"
-                if deadline - now > 3600
-                else "距截止不超过一小时，截止时会提醒发起人。"
+            return self.created_reply(raffle, title, slots, deadline, now)
+        if action == "确认" and len(args) == 1:
+            code = args[0].upper()
+            if not re.fullmatch(r"[A-F0-9]{8}", code):
+                raise RaffleError("请复制表单上的确认指令。")
+            raffle, title, slots, deadline = await asyncio.to_thread(
+                self.store.confirm_form, actor, code, now
             )
-            return f"抽奖 #{raffle} 已发起｜{title}\n抽 {slots} 人，{display_time(deadline)} 截止（北京时间）。\n报名：/抽奖 报名 {raffle}\n{reminder}"
+            return self.created_reply(raffle, title, slots, deadline, now)
         if action == "同步状态" and not args:
             group = actor.group.rsplit(":", 1)[-1]
             state = self.binding_error or self.sync_states.get(
@@ -241,6 +267,15 @@ class RaffleService(FeatureService):
                 raffle, 1
             )
         return HELP
+
+    @staticmethod
+    def created_reply(raffle, title, slots, deadline, now):
+        reminder = (
+            "截止前一小时和截止时会提醒发起人。"
+            if deadline - now > 3600
+            else "距截止不超过一小时，截止时会提醒发起人。"
+        )
+        return f"抽奖 #{raffle} 已发起｜{title}\n抽 {slots} 人，{display_time(deadline)} 截止（北京时间）。\n报名：/抽奖 报名 {raffle}\n{reminder}"
 
     @staticmethod
     def paginate(lines, records, command, page):

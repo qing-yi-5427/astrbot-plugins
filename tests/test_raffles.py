@@ -267,3 +267,65 @@ async def test_reminder_uses_real_at_segment_once_and_recovers_offline(
     assert len(calls) == 1
     assert calls[0].kwargs["group_id"] == 123
     assert calls[0].kwargs["message"][0] == {"type": "at", "data": {"qq": OWNER.qq}}
+
+
+@pytest.mark.asyncio
+async def test_form_to_qq_confirmation_is_scoped_and_one_time(storage, monkeypatch):
+    import re
+    from datetime import datetime
+
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from astrbot_plugin_qing_chat.features.raffle import form
+    from astrbot_plugin_qing_chat.features.raffle.store import ZONE
+
+    monkeypatch.setattr(form.time, "time", lambda: NOW)
+    service = RaffleService(None, {})
+    service.store = storage
+    service.form_url = "https://raffle.example.test"
+    result = await service.execute(OWNER, "发起")
+    path = next(
+        line.removeprefix(service.form_url)
+        for line in result.splitlines()
+        if line.startswith(service.form_url)
+    )
+    deadline = datetime.fromtimestamp(NOW + 7200, ZONE).strftime("%Y-%m-%dT%H:%M")
+    data = {"title": "<示例奖品>", "slots": "2", "deadline": deadline}
+    async with TestClient(
+        TestServer(form.create_app(storage, service.form_url))
+    ) as client:
+        assert (await client.get("/")).status == 200
+        assert (await client.get("/api/plugin/get")).status == 404
+        preview = await client.get(path)
+        assert "中奖人数" in await preview.text()
+        assert preview.headers["Cache-Control"] == "no-store"
+        assert (
+            await client.post(path, data=data, headers={"Origin": "https://other.test"})
+        ).status == 403
+        assert (await client.post(path, data={**data, "slots": "-1"})).status == 400
+        saved = await client.post(path, data=data, headers={"Origin": service.form_url})
+        html = await saved.text()
+        assert saved.status == 200 and "&lt;示例奖品&gt;" in html
+        code = re.search(r"/抽奖 确认 ([A-F0-9]{8})", html)[1]
+        another = await client.post(path, data={**data, "title": "另一份奖品"})
+        assert "另一份奖品" not in await another.text()
+        assert storage.unsynced(0) == []
+        for who in (GUEST, Actor("default:GroupMessage:456", OWNER.qq, OWNER.name)):
+            with pytest.raises(RaffleError, match="找不到"):
+                await service.execute(who, f"确认 {code}")
+        assert "已发起｜<示例奖品>" in await service.execute(OWNER, f"确认 {code}")
+        assert [row["kind"] for row in storage.unsynced(0)] == ["发起"]
+        assert (await client.get(path)).status == 404
+        with pytest.raises(RaffleError, match="找不到"):
+            await service.execute(OWNER, f"确认 {code}")
+
+
+def test_form_expires_and_new_link_replaces_old_draft(storage):
+    from astrbot_plugin_qing_chat.features.raffle.store import DRAFT_TTL
+
+    first = storage.new_form(OWNER, NOW)
+    assert storage.form(first, NOW + DRAFT_TTL - 1) is not None
+    assert storage.form(first, NOW + DRAFT_TTL) is None
+    new = storage.new_form(OWNER, NOW + 5)
+    assert storage.form(first, NOW + 5) is None
+    assert storage.form(new, NOW + 5) is not None

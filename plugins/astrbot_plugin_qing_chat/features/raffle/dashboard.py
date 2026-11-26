@@ -15,6 +15,7 @@ from urllib.parse import urlencode
 from aiohttp import web
 
 from .store import PAGE_SIZE, STATUSES, RaffleError, display_time
+from .summary import group_summary
 from .web_auth import COOKIE, INVITE_TTL, SESSION_TTL, WebAuth
 from .web_records import (
     REMINDERS,
@@ -418,6 +419,41 @@ class Dashboard:
             return operation_error(str(exc), "/panel", self.account(request, actor))
         raise web.HTTPSeeOther("/f/" + token, headers=HEADERS)
 
+    async def summary(self, request):
+        actor, failure = await self.need_actor(request)
+        if failure is not None:
+            return failure
+        number = page_number(request)
+        source = request.query.get("source", "")
+        if source not in {"archive", "live"}:
+            source = ""
+        stats, rows = await asyncio.to_thread(
+            group_summary,
+            self.store,
+            actor.group,
+            int(time.time()),
+            page=number,
+            source=source,
+        )
+
+        def link(next_page):
+            query = {"source": source} if source else {}
+            if next_page > 1:
+                query["page"] = str(next_page)
+            return "/panel/summary" + ("?" + urlencode(query) if query else "")
+
+        return page(
+            "抽奖总结",
+            "summary",
+            {
+                "stats": stats,
+                "rows": rows[:PAGE_SIZE],
+                "source": source,
+                "pager": pagination(number, len(rows) > PAGE_SIZE, link),
+            },
+            account=self.account(request, actor),
+        )
+
     async def draft(self, request):
         actor, failure = await self.need_actor(request)
         if failure is not None:
@@ -604,6 +640,7 @@ def add_dashboard(app, store, origin, resolve_actor, sync_status, require_docume
     app.router.add_post(r"/a/{token:[A-Za-z0-9_-]{43}}", dashboard.activate)
     app.router.add_post("/logout", dashboard.logout)
     app.router.add_get("/panel", dashboard.panel)
+    app.router.add_get("/panel/summary", dashboard.summary)
     app.router.add_post("/panel/new", dashboard.new_draft)
     app.router.add_get("/panel/draft", dashboard.draft)
     app.router.add_post("/panel/draft", dashboard.publish)

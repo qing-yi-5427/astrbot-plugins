@@ -16,6 +16,7 @@ from astrbot_plugin_qing_chat.features.raffle.store import (
     RaffleError,
     Store,
 )
+from astrbot_plugin_qing_chat.features.raffle.summary import import_history
 from astrbot_plugin_qing_chat.features.raffle.web_auth import (
     COOKIE,
     INVITE_TTL,
@@ -91,6 +92,64 @@ def make_app(service, roles):
         resolve_actor=resolve,
         sync_status=lambda group: ((group, "document"), "已绑定「bot 抽奖记录」"),
     )
+
+
+@pytest.mark.asyncio
+async def test_summary_import_is_group_scoped_and_includes_live_result(raffle):
+    service, _ = raffle
+    store = service.store
+    test_number = store.create(OWNER, "测试奖品", 1, NOW + 600, NOW)
+    store.join(OWNER, test_number, NOW)
+    actual = store.create(OWNER, "机器人正式抽奖", 1, NOW - 1, NOW - 10)
+    store.join(MEMBER, actual, NOW - 5)
+    store.close(OWNER, actual, NOW)
+    store.create(OTHER, "另一个群的奖品", 1, NOW + 600, NOW)
+    snapshot = {
+        "旧抽奖表": [
+            {
+                "row": row,
+                "title": "没有登记结果的老奖品" if row == 8 else f"旧奖品 {row}",
+                "organizer": "老群友",
+                "deadline": "2025-01-01",
+                "entrants": ["甲", "乙"],
+                "winners": ["甲"] if row == 7 else [],
+            }
+            for row in range(7, 29)
+        ]
+    }
+    unsynced = [row["id"] for row in store.unsynced(0)]
+    import_history(store, GROUP, snapshot, [test_number])
+    import_history(store, GROUP, snapshot, [test_number])
+    assert [row["id"] for row in store.unsynced(0)] == unsynced
+    qq = await service.execute(OWNER, "总结")
+    assert "共 23 场（云文档历史 22 场，机器人 1 场）" in qq
+    assert "累计参与 45 人次" in qq
+    assert "2 场有结果，记录中奖 2 人次" in qq
+    assert "云文档历史 0 场" in await service.execute(OTHER, "总结")
+    roles = {(actor.group, actor.qq): actor for actor in (OWNER, OTHER)}
+    async with TestClient(TestServer(make_app(service, roles))) as client:
+        assert (await client.get("/panel/summary")).status == 403
+        headers = await sign_in(client, service, OWNER)
+        response = await client.get("/panel/summary", headers=headers)
+        model = page_model(await response.text())
+        assert model["view"] == "summary"
+        assert model["data"]["rows"][0]["id"] == actual
+        assert model["data"]["pager"]["next"] == "/panel/summary?page=2"
+        assert "测试奖品" not in json.dumps(model, ensure_ascii=False)
+        response = await client.get(
+            "/panel/summary?source=archive&page=2", headers=headers
+        )
+        data = page_model(await response.text())["data"]
+        assert data["pager"]["previous"] == "/panel/summary?source=archive"
+        assert [row["source_row"] for row in data["rows"]] == [8, 7]
+        assert data["rows"][0]["winners"] == []
+        assert data["rows"][1]["winners"] == ["甲"]
+        other_headers = await sign_in(client, service, OTHER)
+        response = await client.get(
+            "/panel/summary?source=archive", headers=other_headers
+        )
+        other = page_model(await response.text())["data"]
+        assert other["stats"]["archive"] == 0 and other["rows"] == []
 
 
 def test_web_invite_expiration_replacement_and_session_revoke(raffle):

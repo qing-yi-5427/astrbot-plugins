@@ -28,9 +28,8 @@
   .help-early b { color: var(--color-status-yellow-text); }
   .help-links { display: grid; grid-template-columns: 1fr 1fr; margin-top: 18px; font-size: 21px; }
   .help-links div { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; padding: 13px 15px; }
-  .help-links div + div { border-inline-start: 1px solid var(--dashboard-line); }
-  .help-text { margin-top: 13px; font-size: 20px; color: var(--color-text-secondary); }
-  .help-text code { font: inherit; color: var(--color-status-blue-text); }
+  .help-links div:nth-child(even) { border-inline-start: 1px solid var(--dashboard-line); }
+  .help-links div:nth-child(n+3) { border-top: 1px solid var(--dashboard-line); }
 </style>
 <body>
   <header class="help-brand">
@@ -80,8 +79,9 @@
     <section class="surface help-links" aria-label="查询与管理">
       <div><code class="help-command">/抽奖管理</code> 网页入口</div>
       <div><code class="help-command">/抽奖 结果 12</code> 查结果</div>
+      <div><code class="help-command">/抽奖 总结</code> 查历年统计</div>
+      <div><code class="help-command">/抽奖 帮助 文字</code> 文字版</div>
     </section>
-    <p class="help-text">完整文字版　<code>/抽奖 帮助 文字</code></p>
   </main>
 </body>
 </html>

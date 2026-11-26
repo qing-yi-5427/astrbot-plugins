@@ -26,6 +26,7 @@ from .store import (
     display_time,
     validate_details,
 )
+from .summary import group_summary
 from .web_auth import INVITE_TTL, WebAuth
 
 HELP_CARD = Path(__file__).with_name("assets") / "help.png"
@@ -53,11 +54,13 @@ HELP = (
     "/抽奖 取消 编号 · 发起人或群管理取消\n"
     "/抽奖管理 · 领取 5 分钟有效的网页入口，优先私发。"
     "收到群内入口时，按页面提示在原群确认\n"
-    "/抽奖 同步状态 · 查看腾讯文档同步进度\n\n"
+    "/抽奖 同步状态 · 查看腾讯文档同步进度\n"
+    "/抽奖 总结 · 查看本群历年抽奖和报名统计\n\n"
     "报名截止时会 @ 发起人；离截止超过 1 小时发起的场次还有一次提前提醒。"
     "完整流水可在网页查询。抽奖、参与者和获奖人会更新到本群绑定的腾讯文档「bot 抽奖记录」。"
 )
 ACTIONS = {
+    "总结",
     "帮助",
     "发起",
     "管理",
@@ -400,6 +403,20 @@ class RaffleService(FeatureService):
             return HELP
         if action == "管理" and not args:
             return "在原 QQ 群发 /抽奖管理 领取管理入口。"
+        if action == "总结" and not args:
+            stats, _ = await asyncio.to_thread(
+                group_summary, self.store, actor.group, now
+            )
+            if not stats["total"]:
+                return "本群还没有可统计的抽奖记录。"
+            return (
+                "【本群抽奖总结】\n"
+                f"共 {stats['total']} 场（云文档历史 {stats['archive']} 场，"
+                f"机器人 {stats['live']} 场）\n"
+                f"累计参与 {stats['people']} 人次\n"
+                f"{stats['with_results']} 场有结果，记录中奖 {stats['winners']} 人次\n"
+                "发 /抽奖管理，在网页「抽奖总结」查看明细。"
+            )
         if action == "登录":
             return "网页入口已改为限时链接。在本群发 /抽奖管理 领取。"
         if action == "访问" and len(args) == 1 and self.form_url:

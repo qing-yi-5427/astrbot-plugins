@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   RiAddLine, RiArrowLeftLine, RiArrowRightUpLine, RiCoupon3Line,
   RiDownload2Line, RiFileEditLine, RiGroupLine, RiInbox2Line,
-  RiLogoutBoxRLine, RiStackLine, RiRefreshLine,
+  RiLogoutBoxRLine, RiStackLine, RiRefreshLine, RiBarChartBoxLine,
 } from "@remixicon/react";
 import { Counter } from "@/components/base/badges/counter";
 import { Button, ButtonLink, type ButtonProps } from "@/components/base/buttons/button";
@@ -33,6 +33,13 @@ type Panel = View<"panel", {
   tabs: { id: string; label: string; count: number; href: string }[];
   sync: { state: string; progress: string }; pager: Pager;
 }>;
+type SummaryRecord = {
+  title: string; source: string; deadline: string; people: number; winners: string[];
+} & ({ id: number; state: State } | { id: null; source_row: number; organizer: string });
+type Summary = View<"summary", {
+  stats: { total: number; live: number; archive: number; people: number; with_results: number; winners: number };
+  rows: SummaryRecord[]; source: "" | "archive" | "live"; pager: Pager;
+}>;
 type Raffle = View<"raffle", {
   id: number; state: State; own: number | null; people: number; slots: number; deadline: string;
   actions: Action[]; pager: Pager;
@@ -45,7 +52,7 @@ type Raffle = View<"raffle", {
 type Draft = View<"draft", { draft: { title: string; code: string; slots: number; deadline: string } | null }>;
 type Notice = View<"notice", { message: string; action: Action | null; back: Action | null }>;
 type Pairing = View<"pairing", { command: string }>;
-type Model = Panel | Raffle | Draft | Notice | Pairing;
+type Model = Panel | Raffle | Draft | Summary | Notice | Pairing;
 
 const states: Record<State, { text: string; color: string }> = {
   open: { text: "报名中", color: "bg-status-lime-background text-status-lime-text" },
@@ -88,7 +95,9 @@ function Frame({ account, view, children }: { account: Account | null; view: Mod
         <Brand />
         <nav className="navigation" aria-label="抽奖管理">
           <ButtonLink href="/panel" variant="ghost" leadingIcon={RiStackLine}
-            className="nav-link" aria-current={view !== "draft" ? "page" : undefined}>抽奖记录</ButtonLink>
+            className="nav-link" aria-current={view === "panel" || view === "raffle" ? "page" : undefined}>抽奖记录</ButtonLink>
+          <ButtonLink href="/panel/summary" variant="ghost" leadingIcon={RiBarChartBoxLine}
+            className="nav-link" aria-current={view === "summary" ? "page" : undefined}>抽奖总结</ButtonLink>
           <ButtonLink href="/panel/draft" variant="ghost" leadingIcon={RiFileEditLine}
             className="nav-link" aria-current={view === "draft" ? "page" : undefined}>待发布草稿</ButtonLink>
         </nav>
@@ -244,6 +253,87 @@ function RecordSection({ title, description, headings, rows, empty, action }: {
   );
 }
 
+function SummaryName({ row }: { row: SummaryRecord }) {
+  return <div className="record-name">
+    {row.id === null
+      ? <strong>{row.title}</strong>
+      : <a href={`/panel/r/${row.id}`}>{row.title}<RiArrowRightUpLine aria-hidden /></a>}
+    <span>{row.id === null
+      ? [row.source, row.organizer && `发起人 ${row.organizer}`].filter(Boolean).join(" · ")
+      : `#${row.id} · ${row.source}`}</span>
+  </div>;
+}
+
+function SummaryResult({ row, showLabel }: { row: SummaryRecord; showLabel?: boolean }) {
+  if (row.winners.length) {
+    const preview = row.winners.slice(0, 6).join("、");
+    return <span>{showLabel && <span className="soft">获奖人 </span>}{preview}{row.winners.length > 6 && ` 等 ${row.winners.length} 人`}</span>;
+  }
+  return row.id === null ? <span className="soft">未登记结果</span> : <Status value={row.state} />;
+}
+
+function SummaryPage({ model }: { model: Summary }) {
+  const { stats, rows, source, pager } = model.data;
+  const metrics = [
+    ["抽奖总场次", stats.total], ["累计参与人次", stats.people],
+    ["有结果的场次", stats.with_results], ["记录中奖人次", stats.winners],
+  ] as const;
+  const sections = [
+    { key: "", label: "全部", count: stats.total },
+    { key: "archive", label: "云文档历史", count: stats.archive },
+    { key: "live", label: "机器人", count: stats.live },
+  ];
+  const rowKey = (row: SummaryRecord) => row.id ?? `${row.source}:${row.source_row}`;
+  return <>
+    <div className="page-heading">
+      <div><h1>抽奖总结</h1><p className="summary-description">云文档历史和本群机器人抽奖 · 参与按各场人次累计</p></div>
+    </div>
+    <dl className="summary-metrics">
+      {metrics.map(([label, value]) => <div className="surface" key={label}>
+        <dt>{label}</dt><dd>{value.toLocaleString("zh-CN")}</dd>
+      </div>)}
+    </dl>
+    <section className="surface">
+      <div className="section-heading"><h2>场次明细</h2></div>
+      <nav className="summary-filter" aria-label="记录来源">
+        {sections.map(({ key, label, count }) => <ButtonLink key={key} size="small"
+          href={key ? `/panel/summary?source=${key}` : "/panel/summary"}
+          variant={key === source ? "ghost" : "secondary"} aria-current={key === source ? "page" : undefined}>
+          {label} {count}
+        </ButtonLink>)}
+      </nav>
+      {rows.length ? <>
+        <div className="desktop-table summary-table">
+          <Table aria-label="场次明细" size="sm">
+            <TableHeader>
+              <TableColumn id="title" isRowHeader>奖品与来源</TableColumn>
+              <TableColumn id="deadline">截止时间</TableColumn>
+              <TableColumn id="people">参与人次</TableColumn>
+              <TableColumn id="result">结果</TableColumn>
+            </TableHeader>
+            <TableBody>
+              {rows.map(row => <TableRow key={rowKey(row)}>
+                <TableCell><SummaryName row={row} /></TableCell>
+                <TableCell>{row.deadline || "未填写"}</TableCell>
+                <TableCell>{row.people}</TableCell>
+                <TableCell><SummaryResult row={row} /></TableCell>
+              </TableRow>)}
+            </TableBody>
+          </Table>
+        </div>
+        <ul className="mobile-records" aria-label="场次明细">
+          {rows.map(row => <li key={rowKey(row)}>
+            <SummaryName row={row} />
+            <div className="record-summary"><span>{row.people} 人次参与</span><span>{row.deadline || "未填写截止时间"}</span></div>
+            <p className="summary-result"><SummaryResult row={row} showLabel /></p>
+          </li>)}
+        </ul>
+      </> : <Empty title="暂无抽奖记录" />}
+      <Pagination value={pager} />
+    </section>
+  </>;
+}
+
 function Back({ href = "/panel", label = "抽奖记录" }: { href?: string; label?: string }) {
   return <ButtonLink variant="ghost" size="small" href={href} leadingIcon={RiArrowLeftLine} className="back">{label}</ButtonLink>;
 }
@@ -346,6 +436,7 @@ function App({ model }: { model: Model }) {
     switch (model.view) {
       case "panel": return <PanelPage model={model} />;
       case "raffle": return <RafflePage model={model} />;
+      case "summary": return <SummaryPage model={model} />;
       case "draft": return <DraftPage model={model} />;
       case "notice": return <NoticePage model={model} />;
       case "pairing": return <PairingPage model={model} />;

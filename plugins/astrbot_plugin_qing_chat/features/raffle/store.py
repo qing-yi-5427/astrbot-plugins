@@ -123,6 +123,14 @@ class Store:
                 raffle INTEGER NOT NULL REFERENCES raffles(id), kind TEXT NOT NULL,
                 due INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
                 PRIMARY KEY(raffle,kind))""")
+            db.execute("""CREATE TABLE IF NOT EXISTS raffle_archive (
+                scope TEXT NOT NULL, source TEXT NOT NULL, source_row INTEGER NOT NULL,
+                title TEXT NOT NULL, organizer TEXT NOT NULL, deadline TEXT NOT NULL,
+                entrants TEXT NOT NULL, winners TEXT NOT NULL,
+                PRIMARY KEY(scope, source, source_row))""")
+            db.execute("""CREATE TABLE IF NOT EXISTS raffle_summary_exclusions (
+                scope TEXT NOT NULL, raffle INTEGER NOT NULL REFERENCES raffles(id),
+                PRIMARY KEY(scope, raffle))""")
             db.execute("CREATE INDEX IF NOT EXISTS ledger_raffle ON ledger(raffle,id)")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS reminders_due ON reminders(status, due)"

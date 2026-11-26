@@ -5,7 +5,7 @@ import re
 import unicodedata
 from collections import Counter, defaultdict
 
-from .store import PAGE_SIZE, display_time
+from .store import PAGE_SIZE, RaffleError, display_time
 from .web_records import status_of
 
 RANK_LIMIT = 10
@@ -31,9 +31,27 @@ def ranked(counts, names, limit):
     return rows
 
 
-def leaderboards(live, archive, *, limit=RANK_LIMIT, search=""):
-    names = {}
+def nickname_root(links, key):
+    while key in links:
+        key = links[key]
+    return key
+
+
+def live_aliases(live, links):
     aliases = defaultdict(set)
+    for entrants, _ in live:
+        for person in entrants:
+            key = name_key(person["name"])
+            if key and key != "群友":
+                aliases[nickname_root(links, key)].add(("qq", person["qq"]))
+    return aliases
+
+
+def leaderboards(live, archive, *, limit=RANK_LIMIT, search="", merges=()):
+    names = {}
+    links = {rule["old_key"]: rule["target_key"] for rule in merges}
+    labels = {rule["target_key"]: rule["target_name"] for rule in merges}
+    aliases = live_aliases(live, links)
     entered, awarded = Counter(), Counter()
     term = name_key(search)
     matched = {}
@@ -49,9 +67,6 @@ def leaderboards(live, archive, *, limit=RANK_LIMIT, search=""):
         for person in entrants:
             identity = ("qq", person["qq"])
             names.setdefault(identity, person["name"])
-            alias = name_key(person["name"])
-            if alias and alias != "群友":
-                aliases[alias].add(identity)
             if term:
                 match(identity, person["name"])
             entered[identity] += 1
@@ -59,14 +74,15 @@ def leaderboards(live, archive, *, limit=RANK_LIMIT, search=""):
             awarded[("qq", person["qq"])] += 1
 
     def history_identity(name):
-        alias = name_key(name)
+        alias = nickname_root(links, name_key(name))
         if len(aliases.get(alias, ())) == 1:
             identity = next(iter(aliases[alias]))
         else:
             identity = ("name", alias)
-        names.setdefault(identity, name)
+        names.setdefault(identity, labels.get(alias, name))
         if term:
             match(identity, name)
+            match(identity, names[identity])
         return identity
 
     for entrants, winners in archive:
@@ -127,23 +143,101 @@ def import_history(store, group, sources, exclusions=()):
         )
 
 
-def group_summary(store, group, now, *, page=None, source="", rank_query=""):
-    with store.transaction() as db:
-        live = db.execute(
-            """SELECT r.id, r.title, r.status, r.deadline, r.winners,
+def summary_records(db, group):
+    live = db.execute(
+        """SELECT r.id, r.title, r.status, r.deadline, r.winners,
                       (SELECT json_group_array(json_object('qq',e.qq,'name',e.name))
                        FROM entrants e WHERE e.raffle=r.id) AS entrants
                FROM raffles r WHERE r.scope=? AND NOT EXISTS
                    (SELECT 1 FROM raffle_summary_exclusions x
                     WHERE x.scope=r.scope AND x.raffle=r.id)
                ORDER BY r.id DESC""",
-            (group,),
-        ).fetchall()
-        archive = db.execute(
-            """SELECT source, source_row, title, organizer, deadline, entrants, winners
+        (group,),
+    ).fetchall()
+    archive = db.execute(
+        """SELECT source, source_row, title, organizer, deadline, entrants, winners
                FROM raffle_archive WHERE scope=? ORDER BY source_row DESC, source""",
-            (group,),
-        ).fetchall()
+        (group,),
+    ).fetchall()
+    return live, archive
+
+
+def stored_merges(db, group):
+    return db.execute(
+        "SELECT * FROM raffle_nickname_merges WHERE scope=? ORDER BY id DESC",
+        (group,),
+    ).fetchall()
+
+
+def nickname_merges(store, group):
+    with store.transaction() as db:
+        return [
+            {
+                "id": row["id"],
+                "old": public_name(row["old_name"]),
+                "target": public_name(row["target_name"]),
+            }
+            for row in stored_merges(db, group)
+        ]
+
+
+def merge_nickname(store, group, old, target):
+    old_key, target_key = name_key(old), name_key(target)
+    if not old_key or not target_key or old_key == target_key:
+        raise RaffleError("请输入两个不同的昵称。")
+    with store.transaction(write=True) as db:
+        links = {row["old_key"]: row["target_key"] for row in stored_merges(db, group)}
+        if links.get(old_key) == target_key:
+            return
+        if old_key in links:
+            raise RaffleError("这个旧昵称已有合并，请先撤销原合并。")
+        if nickname_root(links, target_key) == old_key:
+            raise RaffleError("这两个昵称已经指向同一条合并链。")
+        live, archive = summary_records(db, group)
+        archived = {}
+        for record in archive:
+            for name in json.loads(record["entrants"]) + json.loads(record["winners"]):
+                archived.setdefault(name_key(name), name)
+        if old_key not in archived:
+            raise RaffleError("在旧表的参与或中奖记录中找不到这个旧昵称。")
+        live_people = [(json.loads(row["entrants"]), ()) for row in live]
+        target_name = archived.get(target_key)
+        if target_name is None:
+            target_name = next(
+                (
+                    person["name"]
+                    for entrants, _ in live_people
+                    for person in entrants
+                    if name_key(person["name"]) == target_key and target_key != "群友"
+                ),
+                None,
+            )
+        if target_name is None:
+            raise RaffleError("找不到目标昵称，请填写旧表或机器人记录里的完整昵称。")
+        links[old_key] = target_key
+        root = nickname_root(links, target_key)
+        if len(live_aliases(live_people, links).get(root, ())) > 1:
+            raise RaffleError("这些昵称对应多个 QQ 账号，无法合并。")
+        db.execute(
+            """INSERT INTO raffle_nickname_merges
+               (scope, old_key, old_name, target_key, target_name) VALUES (?, ?, ?, ?, ?)""",
+            (group, old_key, archived[old_key], target_key, target_name),
+        )
+
+
+def undo_nickname_merge(store, group, number):
+    with store.transaction(write=True) as db:
+        deleted = db.execute(
+            "DELETE FROM raffle_nickname_merges WHERE scope=? AND id=?", (group, number)
+        )
+        if not deleted.rowcount:
+            raise RaffleError("找不到这条合并记录。")
+
+
+def group_summary(store, group, now, *, page=None, source="", rank_query=""):
+    with store.transaction() as db:
+        live, archive = summary_records(db, group)
+        merges = stored_merges(db, group)
 
     stats = {
         "live": len(live),
@@ -206,5 +300,6 @@ def group_summary(store, group, now, *, page=None, source="", rank_query=""):
             archive_people,
             limit=RANK_LIMIT if page is None else None,
             search=rank_query,
+            merges=merges,
         ),
     )

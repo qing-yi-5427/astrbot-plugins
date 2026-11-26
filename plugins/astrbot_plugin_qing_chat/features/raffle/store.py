@@ -131,6 +131,11 @@ class Store:
             db.execute("""CREATE TABLE IF NOT EXISTS raffle_summary_exclusions (
                 scope TEXT NOT NULL, raffle INTEGER NOT NULL REFERENCES raffles(id),
                 PRIMARY KEY(scope, raffle))""")
+            db.execute("""CREATE TABLE IF NOT EXISTS raffle_nickname_merges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL,
+                old_key TEXT NOT NULL, old_name TEXT NOT NULL,
+                target_key TEXT NOT NULL, target_name TEXT NOT NULL,
+                UNIQUE(scope, old_key))""")
             db.execute("CREATE INDEX IF NOT EXISTS ledger_raffle ON ledger(raffle,id)")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS reminders_due ON reminders(status, due)"

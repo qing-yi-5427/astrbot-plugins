@@ -1,7 +1,7 @@
 import { useId, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  RiAddLine, RiArrowLeftLine, RiArrowRightUpLine, RiCoupon3Line,
+  RiAddLine, RiArrowLeftLine, RiArrowRightLine, RiArrowRightUpLine, RiCoupon3Line,
   RiDownload2Line, RiFileEditLine, RiGroupLine, RiInbox2Line,
   RiLogoutBoxRLine, RiStackLine, RiRefreshLine, RiBarChartBoxLine,
 } from "@remixicon/react";
@@ -54,9 +54,12 @@ type Raffle = View<"raffle", {
   } | null;
 }>;
 type Draft = View<"draft", { draft: { title: string; code: string; slots: number; deadline: string } | null }>;
+type Nicknames = View<"nicknames", {
+  rules: { id: number; old: string; target: string }[]; message: string | null;
+}>;
 type Notice = View<"notice", { message: string; action: Action | null; back: Action | null }>;
 type Pairing = View<"pairing", { command: string }>;
-type Model = Panel | Raffle | Draft | Summary | Notice | Pairing;
+type Model = Panel | Raffle | Draft | Summary | Nicknames | Notice | Pairing;
 
 const states: Record<State, { text: string; color: string }> = {
   open: { text: "报名中", color: "bg-status-lime-background text-status-lime-text" },
@@ -101,7 +104,7 @@ function Frame({ account, view, children }: { account: Account | null; view: Mod
           <ButtonLink href="/panel" variant="ghost" leadingIcon={RiStackLine}
             className="nav-link" aria-current={view === "panel" || view === "raffle" ? "page" : undefined}>抽奖记录</ButtonLink>
           <ButtonLink href="/panel/summary" variant="ghost" leadingIcon={RiBarChartBoxLine}
-            className="nav-link" aria-current={view === "summary" ? "page" : undefined}>抽奖总结</ButtonLink>
+            className="nav-link" aria-current={view === "summary" || view === "nicknames" ? "page" : undefined}>抽奖总结</ButtonLink>
           <ButtonLink href="/panel/draft" variant="ghost" leadingIcon={RiFileEditLine}
             className="nav-link" aria-current={view === "draft" ? "page" : undefined}>待发布草稿</ButtonLink>
         </nav>
@@ -349,7 +352,10 @@ function SummaryPage({ model }: { model: Summary }) {
   return <>
     <div className="page-heading">
       <div><h1>抽奖总结</h1><p className="summary-description">云文档历史和本群机器人抽奖 · 参与按各场人次累计</p></div>
-      <ButtonLink variant="secondary" size="small" href="#summary-records">场次明细</ButtonLink>
+      <div className="summary-heading-actions">
+        {model.account?.role === "群管理" && <ButtonLink href="/panel/summary/nicknames" size="small">合并昵称</ButtonLink>}
+        <ButtonLink variant="secondary" size="small" href="#summary-records">场次明细</ButtonLink>
+      </div>
     </div>
     <dl className="summary-metrics">
       {metrics.map(([label, value]) => <div className="surface" key={label}>
@@ -399,6 +405,46 @@ function SummaryPage({ model }: { model: Summary }) {
         </ul>
       </> : <Empty title="暂无抽奖记录" />}
       <Pagination value={pager} />
+    </section>
+  </>;
+}
+
+function NicknamesPage({ model }: { model: Nicknames }) {
+  const { rules, message } = model.data;
+  const csrf = model.account?.csrf;
+  return <>
+    <Back href="/panel/summary" label="抽奖总结" />
+    <div className="page-heading">
+      <div><h1>合并历史昵称</h1>
+        <p className="summary-description">将旧昵称下的参与和中奖次数归入同一个人。两种昵称都能搜索到合并后的记录。</p>
+      </div>
+    </div>
+    {message && <p className="nickname-feedback" role="status">{message}</p>}
+    <section className="surface nickname-search" aria-label="添加合并">
+      <form method="post" action="/panel/summary/nicknames" className="merge-form">
+        <input type="hidden" name="csrf" value={csrf} />
+        <div className="merge-field">
+          <label htmlFor="merge-old">旧昵称</label>
+          <InputBase id="merge-old" name="old" placeholder="旧表里的完整昵称" maxLength={200} required autoComplete="off" />
+        </div>
+        <div className="merge-field">
+          <label htmlFor="merge-target">归入昵称</label>
+          <InputBase id="merge-target" name="target" placeholder="旧表或机器人记录里的完整昵称" maxLength={200} required autoComplete="off" />
+        </div>
+        <Button type="submit">合并昵称</Button>
+      </form>
+    </section>
+    <section className="surface" aria-label="已有合并">
+      <div className="section-heading"><h2>已有合并</h2></div>
+      {rules.length ? <ul className="merge-rules">
+        {rules.map(rule => <li key={rule.id}>
+          <div><span>{rule.old}</span><RiArrowRightLine aria-label="归入" /><strong>{rule.target}</strong></div>
+          <form method="post" action={`/panel/summary/nicknames/${rule.id}/undo`}>
+            <input type="hidden" name="csrf" value={csrf} />
+            <Button type="submit" variant="secondary" size="small" aria-label={`撤销合并 ${rule.old}`}>撤销</Button>
+          </form>
+        </li>)}
+      </ul> : <p className="table-empty">暂无昵称合并</p>}
     </section>
   </>;
 }
@@ -506,6 +552,7 @@ function App({ model }: { model: Model }) {
       case "panel": return <PanelPage model={model} />;
       case "raffle": return <RafflePage model={model} />;
       case "summary": return <SummaryPage model={model} />;
+      case "nicknames": return <NicknamesPage model={model} />;
       case "draft": return <DraftPage model={model} />;
       case "notice": return <NoticePage model={model} />;
       case "pairing": return <PairingPage model={model} />;

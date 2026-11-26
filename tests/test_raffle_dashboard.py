@@ -16,7 +16,11 @@ from astrbot_plugin_qing_chat.features.raffle.store import (
     RaffleError,
     Store,
 )
-from astrbot_plugin_qing_chat.features.raffle.summary import import_history
+from astrbot_plugin_qing_chat.features.raffle.summary import (
+    group_summary,
+    import_history,
+    merge_nickname,
+)
 from astrbot_plugin_qing_chat.features.raffle.web_auth import (
     COOKIE,
     INVITE_TTL,
@@ -180,6 +184,113 @@ def test_web_invite_expiration_replacement_and_session_revoke(raffle):
     assert auth.accept_private(third, NOW) is None
     auth.logout(browser)
     assert auth.session(browser, NOW) is None
+
+
+@pytest.mark.asyncio
+async def test_admin_nickname_merge_recalculates_rankings_and_can_be_undone(raffle):
+    service, _ = raffle
+    store = service.store
+    rows = [
+        {
+            "row": 2,
+            "title": "奖品甲",
+            "organizer": "发起人",
+            "deadline": "",
+            "entrants": ["旧名字", "新名字"],
+            "winners": ["旧名字", "新名字"],
+        },
+        {
+            "row": 3,
+            "title": "奖品乙",
+            "organizer": "发起人",
+            "deadline": "",
+            "entrants": ["旧名字"],
+            "winners": ["旧名字"],
+        },
+    ]
+    other_admin = Actor(OTHER.group, OTHER.qq, OTHER.name, True)
+    import_history(store, GROUP, {"roll游戏！": rows})
+    import_history(store, OTHER.group, {"roll游戏！": rows})
+    roles = {(actor.group, actor.qq): actor for actor in (MEMBER, ADMIN, other_admin)}
+    path = "/panel/summary/nicknames"
+    async with TestClient(TestServer(make_app(service, roles))) as client:
+        assert (await client.get(path)).status == 403
+        headers = await sign_in(client, service, MEMBER)
+        assert (await client.get(path, headers=headers)).status == 403
+        panel = await client.get("/panel/summary", headers=headers)
+        csrf = page_model(await panel.text())["account"]["csrf"]
+        data = {"old": "旧名字", "target": "新名字", "csrf": csrf}
+        assert (await client.post(path, headers=headers, data=data)).status == 403
+
+        headers = await sign_in(client, service, ADMIN)
+        panel = await client.get(path, headers=headers)
+        data["csrf"] = page_model(await panel.text())["account"]["csrf"]
+        bad_origin = {**headers, "Origin": "https://elsewhere.example"}
+        assert (await client.post(path, headers=bad_origin, data=data)).status == 403
+        result = await client.post(path, headers=headers, data=data)
+        model = page_model(await result.text())
+        assert model["data"]["message"] == "合并已生效。"
+        rule = model["data"]["rules"][0]
+        assert rule["old"] == "旧名字" and rule["target"] == "新名字"
+        result = await client.post(
+            path, headers=headers, data={**data, "old": "新名字", "target": "旧名字"}
+        )
+        assert result.status == 409
+        report = await client.get(
+            "/panel/summary", headers=headers, params={"nickname": "旧名字"}
+        )
+        summary = page_model(await report.text())["data"]
+        assert summary["rankings"]["matches"] == [
+            {"name": "新名字", "entered": 2, "awarded": 2}
+        ]
+        assert summary["stats"]["people"] == summary["stats"]["winners"] == 3
+        assert "新名字 2 次" in await service.execute(ADMIN, "总结 文字")
+
+        undo = f"{path}/{rule['id']}/undo"
+        other_headers = await sign_in(client, service, other_admin)
+        panel = await client.get(path, headers=other_headers)
+        other_model = page_model(await panel.text())
+        assert other_model["data"]["rules"] == []
+        assert (
+            await client.post(
+                undo,
+                headers=other_headers,
+                data={"csrf": other_model["account"]["csrf"]},
+            )
+        ).status == 409
+        result = await client.post(undo, headers=headers, data={"csrf": data["csrf"]})
+        assert page_model(await result.text())["data"]["rules"] == []
+        _, _, restored = group_summary(store, GROUP, NOW, page=1, rank_query="旧名字")
+        assert restored["matches"] == [{"name": "旧名字", "entered": 2, "awarded": 2}]
+
+
+def test_nickname_merge_can_link_to_one_live_account_and_rejects_two(raffle):
+    service, _ = raffle
+    store = service.store
+    import_history(
+        store,
+        GROUP,
+        {
+            "roll游戏！": [
+                {
+                    "row": 2,
+                    "title": "奖品",
+                    "organizer": "群友",
+                    "deadline": "",
+                    "entrants": ["以前的昵称", "另一个人"],
+                    "winners": ["以前的昵称"],
+                }
+            ]
+        },
+    )
+    active = store.create(ADMIN, "新抽奖", 1, NOW + 600, NOW)
+    store.join(Actor(GROUP, "61001", "现在的昵称"), active, NOW)
+    store.join(Actor(GROUP, "61002", "另一个人"), active, NOW)
+    merge_nickname(store, GROUP, "以前的昵称", "现在的昵称")
+    _, _, result = group_summary(store, GROUP, NOW, page=1, rank_query="以前的昵称")
+    assert result["matches"] == [{"name": "现在的昵称", "entered": 2, "awarded": 1}]
+    with pytest.raises(RaffleError, match="多个 QQ 账号"):
+        merge_nickname(store, GROUP, "另一个人", "以前的昵称")
 
 
 @pytest.mark.asyncio

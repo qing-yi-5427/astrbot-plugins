@@ -15,7 +15,13 @@ from urllib.parse import urlencode
 from aiohttp import web
 
 from .store import PAGE_SIZE, STATUSES, RaffleError, display_time
-from .summary import RANK_LIMIT, group_summary
+from .summary import (
+    RANK_LIMIT,
+    group_summary,
+    merge_nickname,
+    nickname_merges,
+    undo_nickname_merge,
+)
 from .web_auth import COOKIE, INVITE_TTL, SESSION_TTL, WebAuth
 from .web_records import (
     REMINDERS,
@@ -37,6 +43,7 @@ HEADERS = {
 }
 EXPORTS = {"participants": "导出名单", "audit": "导出流水"}
 OPERATIONS = {"draw": "开奖", "cancel": "取消"}
+NICKNAMES_PATH = "/panel/summary/nicknames"
 
 
 class QQUnavailable(RuntimeError):
@@ -461,6 +468,70 @@ class Dashboard:
             account=self.account(request, actor),
         )
 
+    async def nickname_admin(self, request):
+        actor, failure = await self.need_actor(request)
+        if failure is not None:
+            return None, failure
+        if not actor.moderator:
+            return None, notice(
+                "需要群管理权限",
+                "仅群主和群管理员可以合并本群的历史昵称。",
+                status=403,
+                account=self.account(request, actor),
+                back={"href": "/panel/summary", "label": "抽奖总结"},
+            )
+        return actor, None
+
+    async def nicknames(self, request):
+        actor, failure = await self.nickname_admin(request)
+        if failure is not None:
+            return failure
+        rules = await asyncio.to_thread(nickname_merges, self.store, actor.group)
+        feedback = {"merged": "合并已生效。", "undone": "已撤销这条合并。"}
+        return page(
+            "合并历史昵称",
+            "nicknames",
+            {"rules": rules, "message": feedback.get(request.query.get("change"))},
+            account=self.account(request, actor),
+        )
+
+    async def merge_nicknames(self, request):
+        await self.check_post(request, require_csrf=True)
+        actor, failure = await self.nickname_admin(request)
+        if failure is not None:
+            return failure
+        form = await request.post()
+        old, target = form.get("old"), form.get("target")
+        if any(
+            not isinstance(value, str) or len(value) > 200 for value in (old, target)
+        ):
+            raise web.HTTPBadRequest(headers=HEADERS)
+        try:
+            await asyncio.to_thread(
+                merge_nickname, self.store, actor.group, old, target
+            )
+        except RaffleError as exc:
+            return operation_error(
+                str(exc), NICKNAMES_PATH, self.account(request, actor)
+            )
+        raise web.HTTPSeeOther(f"{NICKNAMES_PATH}?change=merged", headers=HEADERS)
+
+    async def undo_merge(self, request):
+        await self.check_post(request, require_csrf=True)
+        actor, failure = await self.nickname_admin(request)
+        if failure is not None:
+            return failure
+        number = int(request.match_info["number"])
+        try:
+            await asyncio.to_thread(
+                undo_nickname_merge, self.store, actor.group, number
+            )
+        except RaffleError as exc:
+            return operation_error(
+                str(exc), NICKNAMES_PATH, self.account(request, actor)
+            )
+        raise web.HTTPSeeOther(f"{NICKNAMES_PATH}?change=undone", headers=HEADERS)
+
     async def draft(self, request):
         actor, failure = await self.need_actor(request)
         if failure is not None:
@@ -648,6 +719,11 @@ def add_dashboard(app, store, origin, resolve_actor, sync_status, require_docume
     app.router.add_post("/logout", dashboard.logout)
     app.router.add_get("/panel", dashboard.panel)
     app.router.add_get("/panel/summary", dashboard.summary)
+    app.router.add_get(NICKNAMES_PATH, dashboard.nicknames)
+    app.router.add_post(NICKNAMES_PATH, dashboard.merge_nicknames)
+    app.router.add_post(
+        NICKNAMES_PATH + r"/{number:[1-9][0-9]{0,17}}/undo", dashboard.undo_merge
+    )
     app.router.add_post("/panel/new", dashboard.new_draft)
     app.router.add_get("/panel/draft", dashboard.draft)
     app.router.add_post("/panel/draft", dashboard.publish)

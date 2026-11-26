@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from .store import display_time
 
+SHEET_NAME = "bot 抽奖记录"
 HEADERS = (
     "流水号",
     "时间（北京时间）",
@@ -26,6 +27,25 @@ def document_id(url):
     if parts.scheme != "https" or parts.netloc != "docs.qq.com" or not match:
         raise ValueError("请填写腾讯文档在线表格链接。")
     return match[1]
+
+
+def group_documents(entries):
+    if not isinstance(entries, list):
+        raise ValueError("群聊文档绑定应为列表")
+    bindings, documents = {}, set()
+    for entry in entries:
+        if not isinstance(entry, str):
+            raise ValueError("绑定格式为：群号=腾讯文档链接")
+        group, separator, url = entry.partition("=")
+        group = group.strip()
+        if not separator or not re.fullmatch(r"[1-9][0-9]{4,14}", group):
+            raise ValueError("绑定格式为：群号=腾讯文档链接")
+        file_id = document_id(url.strip())
+        if group in bindings or file_id in documents:
+            raise ValueError("每个群号和文档只能绑定一次")
+        bindings[group] = file_id
+        documents.add(file_id)
+    return bindings
 
 
 def parse_result(result):
@@ -100,12 +120,13 @@ class AstrBotSheetTools:
 
 
 class CloudLedger:
-    def __init__(self, store, file_id, call):
+    def __init__(self, store, group, file_id, call):
         self.store = store
+        self.group = group
         self.file_id = file_id
         self.call = call
-        self.namespace = f"tencent:{file_id}:"
-        self.marker = "抽奖流水·" + self.store.anonymous("sheet-owner")
+        self.namespace = f"tencent:group:{group}:{file_id}:"
+        self.marker = SHEET_NAME + "·" + self.store.anonymous("sheet-owner:" + group)
 
     async def setting(self, name):
         return await asyncio.to_thread(self.store.setting, self.namespace + name)
@@ -152,23 +173,19 @@ class CloudLedger:
             selected = next(
                 (item for item in sheets if item["sheet_id"] == saved), None
             )
-            if selected is None:
-                raise RuntimeError("Managed Tencent Docs worksheet no longer exists")
+            if selected is None or selected["sheet_name"] != SHEET_NAME:
+                raise MCPUnavailable(f"找不到原来的「{SHEET_NAME}」标签页")
             return selected
-        name = await self.setting("pending_name")
-        if not name:
-            existing = {item["sheet_name"] for item in sheets}
-            name = "抽奖流水" if "抽奖流水" not in existing else self.marker
-            if name in existing:
-                raise RuntimeError("Managed worksheet name is already occupied")
-            await self.save("pending_name", name)
-        selected = next((item for item in sheets if item["sheet_name"] == name), None)
+        selected = next(
+            (item for item in sheets if item["sheet_name"] == SHEET_NAME), None
+        )
         if selected is None:
             created = await call(
                 "add_sheet",
-                {"file_id": self.file_id, "name": name, "append_index": True},
+                {"file_id": self.file_id, "name": SHEET_NAME, "append_index": True},
             )
             selected = {"sheet_id": created["sheet_id"], "row_count": None}
+            await self.save("created_sheet_id", selected["sheet_id"])
         sheet = selected["sheet_id"]
         header = await self.read(call, sheet, 0, 0, len(HEADERS))
         marker = header.get((0, len(HEADERS)), {}).get("string_value")
@@ -178,14 +195,15 @@ class CloudLedger:
             for cell in header.values()
         )
         if marker != self.marker:
+            created_here = await self.setting("created_sheet_id") == sheet
+            used_rows = (selected.get("used_range") or {}).get("row_count")
             if (
                 started
                 or populated
-                or (selected.get("used_range") or {}).get("row_count", 0) > 0
+                or (isinstance(used_rows, int) and used_rows > 0)
+                or (used_rows is None and not created_here)
             ):
-                raise RuntimeError(
-                    "Cannot take over an existing Tencent Docs worksheet"
-                )
+                raise MCPUnavailable(f"「{SHEET_NAME}」已有数据或无法确认空白")
             await self.write(call, sheet, [(0, (*HEADERS, self.marker))])
         await self.save("sheet_id", sheet)
         return selected
@@ -194,21 +212,22 @@ class CloudLedger:
         detail = "，".join(
             f"{key} {value}" for key, value in json.loads(record["detail"]).items()
         )
-        group = record["scope"]
         return (
             f"R{record['id']}",
             display_time(record["at"]),
-            self.store.anonymous(group),
+            self.store.anonymous(self.group),
             f"#{record['raffle']}",
             record["kind"],
             record["name"],
-            self.store.anonymous(group + ":" + record["qq"]) if record["qq"] else "",
+            self.store.anonymous(self.group + ":" + record["qq"])
+            if record["qq"]
+            else "",
             detail,
         )
 
     async def sync(self):
-        after = int(await self.setting("cursor") or 0)
-        records = await asyncio.to_thread(self.store.unsynced, after)
+        after, written = json.loads(await self.setting("position") or "[0, 0]")
+        records = await asyncio.to_thread(self.store.unsynced, after, self.group)
         if not records and await self.setting("sheet_id"):
             return 0
         async with asyncio.timeout(55):
@@ -220,7 +239,7 @@ class CloudLedger:
                 raise RuntimeError("Managed worksheet header was changed")
             if not records:
                 return 0
-            first, last = records[0]["id"], records[-1]["id"]
+            first, last = written + 1, written + len(records)
             count = selected.get("row_count")
             if isinstance(count, int) and 0 < count <= last:
                 await call(
@@ -237,18 +256,26 @@ class CloudLedger:
             existing = await self.read(call, sheet, max(1, first - 1), last, 0)
             if (
                 first > 1
-                and existing.get((first - 1, 0), {}).get("string_value")
-                != f"R{first - 1}"
+                and existing.get((first - 1, 0), {}).get("string_value") != f"R{after}"
             ):
                 raise RuntimeError("Managed worksheet rows were moved or removed")
-            for row in range(first, last + 1):
+            for row, record in enumerate(records, first):
                 cell = existing.get((row, 0), {})
-                if cell and cell.get("string_value") not in (None, "", f"R{row}"):
+                if cell and cell.get("string_value") not in (
+                    None,
+                    "",
+                    f"R{record['id']}",
+                ):
                     raise RuntimeError("Managed worksheet rows were moved or edited")
                 if cell.get("value_type") not in (None, "STRING"):
                     raise RuntimeError("Managed worksheet row identifier was edited")
             await self.write(
-                call, sheet, [(row["id"], self.columns(row)) for row in records]
+                call,
+                sheet,
+                [
+                    (row, self.columns(record))
+                    for row, record in enumerate(records, first)
+                ],
             )
-            await self.save("cursor", last)
+            await self.save("position", json.dumps([records[-1]["id"], last]))
             return len(records)

@@ -8,6 +8,8 @@ from astrbot_plugin_qing_chat.features.raffle.cloud import (
     AstrBotSheetTools,
     CloudLedger,
     MCPUnavailable,
+    SHEET_NAME,
+    group_documents,
 )
 from astrbot_plugin_qing_chat.features.raffle.main import RaffleService, mention_command
 from astrbot_plugin_qing_chat.features.raffle.store import Actor, RaffleError, Store
@@ -135,6 +137,8 @@ async def test_native_mcp_client_is_reused_and_sheet_creation_is_not_retried():
 @pytest.mark.asyncio
 async def test_cloud_replicates_after_uncertain_write_using_same_rows(storage):
     raffle = storage.create(OWNER, "=literal text", 1, NOW + 7200, NOW)
+    outsider = Actor("default:GroupMessage:456", "5001", "其他群")
+    storage.create(outsider, "其他群的数据", 1, NOW + 7200, NOW)
     storage.join(GUEST, raffle, NOW)
     sheets = [{"sheet_id": "original", "sheet_name": "旧标签页", "row_count": 100}]
     cells = {}
@@ -142,6 +146,7 @@ async def test_cloud_replicates_after_uncertain_write_using_same_rows(storage):
 
     async def call(name, arguments):
         nonlocal lost
+        assert arguments["file_id"] == "fake"
         if name == "get_sheet_info":
             return {"sheets": sheets}
         if name == "add_sheet":
@@ -172,17 +177,57 @@ async def test_cloud_replicates_after_uncertain_write_using_same_rows(storage):
                 raise TimeoutError("write succeeded but response was lost")
         return {}
 
-    sync = CloudLedger(storage, "fake", call)
+    sync = CloudLedger(storage, "123", "fake", call)
     with pytest.raises(TimeoutError):
         await sync.sync()
     assert await sync.sync() == 2
     assert await sync.sync() == 0
-    assert len(sheets) == 2 and sheets[1]["sheet_name"] == "抽奖流水"
+    assert len(sheets) == 2 and sheets[1]["sheet_name"] == SHEET_NAME
     assert cells[1, 0]["string_value"] == "R1"
-    assert cells[2, 0]["string_value"] == "R2"
+    assert cells[2, 0]["string_value"] == "R3"
     assert cells[2, 6]["string_value"] != GUEST.qq
     assert "=literal text" in cells[1, 7]["string_value"]
     assert max(row for row, _ in cells) == 2
+    storage.create(outsider, "其他群的数据2", 1, NOW + 7200, NOW)
+    storage.create(OWNER, "本群下一条", 1, NOW + 7200, NOW)
+    assert await sync.sync() == 1
+    assert cells[3, 0]["string_value"] == "R5"
+
+
+def test_each_group_and_each_document_only_bound_once():
+    base = "https://docs.qq.com/sheet/"
+    assert group_documents([f"12345={base}Doc1?tab=1", f"23456={base}Doc2"]) == {
+        "12345": "Doc1",
+        "23456": "Doc2",
+    }
+    with pytest.raises(ValueError, match="只能绑定一次"):
+        group_documents([f"12345={base}Doc1?tab=1", f"23456={base}Doc1?tab=2"])
+    with pytest.raises(ValueError, match="只能绑定一次"):
+        group_documents([f"12345={base}Doc1", f"12345={base}Doc2"])
+
+
+@pytest.mark.asyncio
+async def test_named_tab_with_existing_data_is_not_overwritten(storage):
+    call = AsyncMock(
+        side_effect=[
+            {
+                "sheets": [
+                    {
+                        "sheet_id": "occupied",
+                        "sheet_name": SHEET_NAME,
+                        "used_range": {"row_count": 15},
+                    }
+                ]
+            },
+            {"cells": []},
+        ]
+    )
+    with pytest.raises(MCPUnavailable, match="已有数据"):
+        await CloudLedger(storage, "123", "fake", call).sync()
+    assert [t.args[0] for t in call.await_args_list] == [
+        "get_sheet_info",
+        "get_cell_data",
+    ]
 
 
 @pytest.mark.asyncio

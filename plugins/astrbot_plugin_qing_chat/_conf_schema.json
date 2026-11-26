@@ -214,11 +214,11 @@
         "type": "bool",
         "default": true
       },
-      "document_url": {
-        "description": "腾讯文档在线表格链接",
-        "type": "string",
-        "default": "",
-        "hint": "同步时在同一份文档新建抽奖流水标签页。"
+      "group_documents": {
+        "description": "QQ 群与腾讯文档绑定",
+        "type": "list",
+        "default": [],
+        "hint": "每项填写 群号=腾讯文档在线表格链接。每群固定一本表格，仅写入「bot 抽奖记录」标签页。未绑定的群仅保存在本地。"
       },
       "mcp_server": {
         "description": "AstrBot 里的腾讯文档 MCP 服务名称",

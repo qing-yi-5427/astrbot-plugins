@@ -311,8 +311,13 @@ class Store:
                 detail={"类型": raffle["kind"]},
             )
 
-    def unsynced(self, after):
+    def unsynced(self, after, group=None):
         with self.transaction() as db:
+            if group is not None:
+                return db.execute(
+                    "SELECT * FROM ledger WHERE id>? AND scope LIKE ? ORDER BY id LIMIT 30",
+                    (after, f"%:GroupMessage:{group}"),
+                ).fetchall()
             return db.execute(
                 "SELECT * FROM ledger WHERE id>? ORDER BY id LIMIT 30", (after,)
             ).fetchall()

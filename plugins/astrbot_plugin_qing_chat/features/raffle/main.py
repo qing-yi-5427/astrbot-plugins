@@ -11,7 +11,7 @@ from pathlib import Path
 from astrbot.api.star import StarTools
 
 from ...runtime import FeatureService
-from .cloud import AstrBotSheetTools, CloudLedger, MCPUnavailable, document_id
+from .cloud import AstrBotSheetTools, CloudLedger, MCPUnavailable, group_documents
 from .store import Actor, PAGE_SIZE, RaffleError, Store, ZONE, display_time
 
 HELP = (
@@ -83,8 +83,8 @@ class RaffleService(FeatureService):
     def __init__(self, context, config):
         super().__init__(context, config)
         self.tasks = []
-        self.cloud = None
-        self.sync_state = "等待配置腾讯文档链接"
+        self.sync_states = {}
+        self.binding_error = ""
 
     async def initialize(self):
         directory = Path(StarTools.get_data_dir("astrbot_plugin_qing_chat")) / "raffle"
@@ -92,22 +92,24 @@ class RaffleService(FeatureService):
         self.store = Store(directory / "raffles.sqlite3")
         await asyncio.to_thread(self.store.initialize)
         self.store.path.chmod(0o600)
-        url = self.config.get("document_url", "").strip()
         server = self.config.get("mcp_server", "tencent-docs-sheet").strip()
-        if url and server:
-            try:
-                self.cloud = CloudLedger(
-                    self.store,
-                    document_id(url),
-                    AstrBotSheetTools(self.context, server),
-                )
-            except ValueError:
-                self.sync_state = "腾讯文档链接无效"
-            else:
-                self.sync_state = "等待首次同步"
-                self.tasks.append(asyncio.create_task(self.sync_loop()))
+        try:
+            bindings = group_documents(self.config.get("group_documents", []))
+            if bindings and not server:
+                raise ValueError("请填写腾讯文档 MCP 服务名称")
+        except ValueError as exc:
+            self.binding_error = str(exc)
+        else:
+            tools = AstrBotSheetTools(self.context, server)
+            for group, file_id in bindings.items():
+                cloud = CloudLedger(self.store, group, file_id, tools)
+                self.sync_states[group] = "等待首次同步"
+                self.tasks.append(asyncio.create_task(self.sync_loop(group, cloud)))
         self.tasks.append(asyncio.create_task(self.reminder_loop()))
-        self.logger.info("群抽奖模块已加载，腾讯文档同步：%s", self.sync_state)
+        self.logger.info(
+            "群抽奖模块已加载，腾讯文档同步：%s",
+            self.binding_error or f"已绑定 {len(self.sync_states)} 个群",
+        )
 
     async def terminate(self):
         for task in self.tasks:
@@ -182,7 +184,11 @@ class RaffleService(FeatureService):
             )
             return f"抽奖 #{raffle} 已发起｜{title}\n抽 {slots} 人，{display_time(deadline)} 截止（北京时间）。\n报名：/抽奖 报名 {raffle}\n{reminder}"
         if action == "同步状态" and not args:
-            return "腾讯文档同步：" + self.sync_state
+            group = actor.group.rsplit(":", 1)[-1]
+            state = self.binding_error or self.sync_states.get(
+                group, "本群未绑定文档，记录保存在本地"
+            )
+            return "腾讯文档同步：" + state
         if action in ("列表", "历史") and len(args) <= 1:
             page = number(args[0]) if args else 1
             rows = await asyncio.to_thread(
@@ -321,22 +327,28 @@ class RaffleService(FeatureService):
                 self.store.finish_reminder, raffle, int(time.time()), confirmed
             )
 
-    async def sync_loop(self):
+    async def sync_loop(self, group, cloud):
         delay = 10
         while True:
             try:
-                synced = await self.cloud.sync()
-                self.sync_state = "已接通，记录后台同步中"
+                synced = await cloud.sync()
+                state = "已绑定「bot 抽奖记录」，后台自动同步"
+                if self.sync_states[group] != state:
+                    self.logger.info("本群的腾讯文档抽奖标签页已就绪")
+                self.sync_states[group] = state
                 delay = 10
                 await asyncio.sleep(2 if synced else 20)
             except MCPUnavailable as exc:
-                self.sync_state = f"{exc}，本地已有记录，等待连接"
+                state = f"{exc}，记录保存在本地，等待重试"
+                if self.sync_states[group] != state:
+                    self.logger.info("群抽奖文档同步暂停：%s", exc)
+                self.sync_states[group] = state
                 await asyncio.sleep(20)
             except Exception as exc:
-                if self.sync_state != "同步失败，记录已存在本地，等待重试":
+                if self.sync_states[group] != "同步失败，记录保存在本地，等待重试":
                     self.logger.warning(
                         "群抽奖腾讯文档同步失败 (%s)", type(exc).__name__
                     )
-                self.sync_state = "同步失败，记录已存在本地，等待重试"
+                self.sync_states[group] = "同步失败，记录保存在本地，等待重试"
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 300)

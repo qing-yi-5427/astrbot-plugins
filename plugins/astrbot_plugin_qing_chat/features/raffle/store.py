@@ -14,6 +14,12 @@ from zoneinfo import ZoneInfo
 ZONE = ZoneInfo("Asia/Shanghai")
 PAGE_SIZE = 20
 DRAFT_TTL = 15 * 60
+STATUSES = {
+    "open": "报名中",
+    "closed": "待开奖",
+    "drawn": "已开奖",
+    "cancelled": "已取消",
+}
 
 
 def display_time(timestamp):
@@ -49,6 +55,9 @@ class Actor:
     qq: str
     name: str
     moderator: bool = False
+
+    def can_manage(self, raffle):
+        return self.moderator or self.qq == raffle["owner"]
 
 
 class Store:
@@ -94,6 +103,14 @@ class Store:
                 token_hash TEXT PRIMARY KEY, scope TEXT NOT NULL, qq TEXT NOT NULL,
                 code TEXT NOT NULL, expires INTEGER NOT NULL, title TEXT,
                 slots INTEGER, deadline INTEGER, UNIQUE(scope, qq))""")
+            db.execute("""CREATE TABLE IF NOT EXISTS web_sessions (
+                browser_key TEXT PRIMARY KEY, scope TEXT NOT NULL, qq TEXT NOT NULL,
+                ends INTEGER NOT NULL, challenge_ends INTEGER NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS web_notices (
+                raffle INTEGER NOT NULL REFERENCES raffles(id), kind TEXT NOT NULL,
+                due INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+                PRIMARY KEY(raffle,kind))""")
+            db.execute("CREATE INDEX IF NOT EXISTS ledger_raffle ON ledger(raffle,id)")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS reminders_due ON reminders(status, due)"
             )
@@ -149,12 +166,16 @@ class Store:
         with self.transaction(write=True) as db:
             return self._create(db, who, title, slots, deadline, now)
 
-    def _create(self, db, who, title, slots, deadline, now):
+    def _create(self, db, who, title, slots, deadline, now, *, web=False):
         number = db.execute(
             "INSERT INTO raffles (scope,title,owner,deadline,slots) VALUES (?,?,?,?,?)",
             (who.group, title, who.qq, deadline, slots),
         ).lastrowid
         raffle = self.get(db, who.group, number)
+        detail = {"奖品": title, "中奖人数": slots, "截止时间": display_time(deadline)}
+        if web:
+            detail["来源"] = "网页"
+            self.queue_web_notice(db, number, "网页发布", now)
         self.record(
             db,
             raffle,
@@ -162,7 +183,7 @@ class Store:
             "发起",
             who.qq,
             who.name,
-            {"奖品": title, "中奖人数": slots, "截止时间": display_time(deadline)},
+            detail,
         )
         db.execute(
             "INSERT INTO reminders (raffle,kind,due) VALUES (?,?,?)",
@@ -221,7 +242,15 @@ class Store:
             )
             return True
 
-    def confirm_form(self, who, code, now):
+    def current_draft(self, who, now):
+        with self.transaction() as db:
+            return db.execute(
+                """SELECT title,slots,deadline,code FROM form_drafts
+                   WHERE scope=? AND qq=? AND expires>? AND title IS NOT NULL""",
+                (who.group, who.qq, now),
+            ).fetchone()
+
+    def confirm_form(self, who, code, now, *, web=False):
         with self.transaction(write=True) as db:
             row = db.execute(
                 """SELECT * FROM form_drafts WHERE scope=? AND qq=? AND code=?
@@ -229,20 +258,18 @@ class Store:
                 (who.group, who.qq, code, now),
             ).fetchone()
             if row is None:
-                raise RaffleError(
-                    "找不到可确认的表单。请由发起人在原群发送表单里的确认指令。"
-                )
+                raise RaffleError("找不到可确认的表单，可能已经发布或失效。")
             if row["deadline"] <= now:
                 raise RaffleError("截止时间已过，请重新发起。")
             raffle = self._create(
-                db, who, row["title"], row["slots"], row["deadline"], now
+                db, who, row["title"], row["slots"], row["deadline"], now, web=web
             )
             db.execute(
                 "DELETE FROM form_drafts WHERE token_hash=?", (row["token_hash"],)
             )
             return raffle, row["title"], row["slots"], row["deadline"]
 
-    def join(self, who, number, now):
+    def join(self, who, number, now, *, web=False):
         with self.transaction(write=True) as db:
             raffle = self.get(db, who.group, number)
             if raffle["status"] != "open" or now >= raffle["deadline"]:
@@ -259,13 +286,16 @@ class Store:
                 "INSERT INTO entrants VALUES (?,?,?,?)",
                 (number, who.qq, who.name, slot),
             )
-            self.record(db, raffle, now, "报名", who.qq, who.name, {"报名序号": slot})
+            detail = {"报名序号": slot}
+            if web:
+                detail["来源"] = "网页"
+            self.record(db, raffle, now, "报名", who.qq, who.name, detail)
             return slot, True
 
-    def close(self, who, number, now, *, cancel=False):
+    def close(self, who, number, now, *, cancel=False, web=False):
         with self.transaction(write=True) as db:
             raffle = self.get(db, who.group, number)
-            if who.qq != raffle["owner"] and not who.moderator:
+            if not who.can_manage(raffle):
                 raise RaffleError("只有该场发起人、群主或群管理员可以开奖和取消。")
             if raffle["status"] == "drawn" and not cancel:
                 return False, raffle, json.loads(raffle["winners"])
@@ -275,11 +305,15 @@ class Store:
                 db.execute(
                     "UPDATE raffles SET status='cancelled' WHERE id=?", (number,)
                 )
-                self.record(db, raffle, now, "取消", who.qq, who.name)
+                detail = {"来源": "网页"} if web else None
+                self.record(db, raffle, now, "取消", who.qq, who.name, detail)
                 db.execute(
                     "UPDATE reminders SET status='skipped' WHERE raffle=? AND status='pending'",
                     (number,),
                 )
+                self.skip_web_open_notice(db, number)
+                if web:
+                    self.queue_web_notice(db, number, "网页取消", now)
                 return True, raffle, []
             if now < raffle["deadline"]:
                 raise RaffleError(
@@ -303,6 +337,15 @@ class Store:
                 "UPDATE raffles SET status='drawn', eligible=?, winners=? WHERE id=?",
                 (len(entrants), json.dumps(winners, ensure_ascii=False), number),
             )
+            detail = {
+                "报名总人数": len(entrants),
+                "设置中奖人数": raffle["slots"],
+                "实际中奖人数": len(winners),
+            }
+            if web:
+                detail["来源"] = "网页"
+                self.queue_web_notice(db, number, "网页开奖", now)
+            self.skip_web_open_notice(db, number)
             self.record(
                 db,
                 raffle,
@@ -310,11 +353,7 @@ class Store:
                 "开奖",
                 who.qq,
                 who.name,
-                {
-                    "报名总人数": len(entrants),
-                    "设置中奖人数": raffle["slots"],
-                    "实际中奖人数": len(winners),
-                },
+                detail,
             )
             for winner in winners:
                 self.record(
@@ -327,6 +366,53 @@ class Store:
                     {"抽中序号": winner["number"]},
                 )
             return True, self.get(db, who.group, number), winners
+
+    @staticmethod
+    def skip_web_open_notice(db, number):
+        db.execute(
+            "UPDATE web_notices SET status='skipped' WHERE raffle=? AND kind='网页发布' AND status='pending'",
+            (number,),
+        )
+
+    @staticmethod
+    def queue_web_notice(db, number, kind, now):
+        db.execute(
+            "INSERT INTO web_notices (raffle,kind,due) VALUES (?,?,?)",
+            (number, kind, now),
+        )
+
+    def pending_notices(self):
+        with self.transaction() as db:
+            return db.execute(
+                """SELECT r.*, n.kind, n.due FROM web_notices n JOIN raffles r ON r.id=n.raffle
+                   WHERE n.status='pending' ORDER BY n.due,n.raffle"""
+            ).fetchall()
+
+    def claim_notice(self, raffle):
+        with self.transaction(write=True) as db:
+            return (
+                db.execute(
+                    """UPDATE web_notices SET status='attempted'
+                   WHERE raffle=? AND kind=? AND status='pending'""",
+                    (raffle["id"], raffle["kind"]),
+                ).rowcount
+                == 1
+            )
+
+    def finish_notice(self, raffle, now, confirmed):
+        with self.transaction(write=True) as db:
+            status = "sent" if confirmed else "unconfirmed"
+            db.execute(
+                "UPDATE web_notices SET status=? WHERE raffle=? AND kind=?",
+                (status, raffle["id"], raffle["kind"]),
+            )
+            self.record(
+                db,
+                raffle,
+                now,
+                "QQ 公告已取得回执" if confirmed else "QQ 公告发送状态未确认",
+                detail={"类型": raffle["kind"]},
+            )
 
     def list_raffles(self, group, page, history):
         statuses = ("drawn", "cancelled") if history else ("open", "closed")

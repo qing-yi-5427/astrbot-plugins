@@ -12,8 +12,18 @@ from astrbot.api.star import StarTools
 
 from ...runtime import FeatureService
 from .cloud import AstrBotSheetTools, CloudLedger, MCPUnavailable, group_documents
+from .dashboard import QQUnavailable
 from .form import FORM_PORT, create_app, form_origin
-from .store import Actor, PAGE_SIZE, RaffleError, Store, display_time, validate_details
+from .store import (
+    PAGE_SIZE,
+    STATUSES,
+    Actor,
+    RaffleError,
+    Store,
+    display_time,
+    validate_details,
+)
+from .web_auth import WebAuth
 
 HELP = (
     "群抽奖（北京时间）\n"
@@ -23,11 +33,14 @@ HELP = (
     "/抽奖 列表 [页] · /抽奖 报名 编号 · /抽奖 名单 编号 [页]\n"
     "/抽奖 开奖 编号 · /抽奖 取消 编号\n"
     "/抽奖 历史 [页] · /抽奖 结果 编号 [页]\n"
+    "/抽奖 管理 · 打开网页管理台\n"
     "也可以 @机器人 后输入上述动作，例如 @机器人 报名 12。"
 )
 ACTIONS = {
     "帮助",
     "发起",
+    "管理",
+    "登录",
     "确认",
     "报名",
     "列表",
@@ -37,12 +50,6 @@ ACTIONS = {
     "历史",
     "结果",
     "同步状态",
-}
-STATUSES = {
-    "open": "报名中",
-    "closed": "待开奖",
-    "drawn": "已开奖",
-    "cancelled": "已取消",
 }
 
 
@@ -87,6 +94,7 @@ class RaffleService(FeatureService):
         super().__init__(context, config)
         self.tasks = []
         self.sync_states = {}
+        self.document_bindings = {}
         self.binding_error = ""
         self.form_url = ""
         self.form_runner = None
@@ -97,7 +105,6 @@ class RaffleService(FeatureService):
         self.store = Store(directory / "raffles.sqlite3")
         await asyncio.to_thread(self.store.initialize)
         self.store.path.chmod(0o600)
-        await self.start_form()
         server = self.config.get("mcp_server", "tencent-docs-sheet").strip()
         try:
             bindings = group_documents(self.config.get("group_documents", []))
@@ -106,11 +113,13 @@ class RaffleService(FeatureService):
         except ValueError as exc:
             self.binding_error = str(exc)
         else:
+            self.document_bindings = bindings
             tools = AstrBotSheetTools(self.context, server)
             for group, file_id in bindings.items():
                 cloud = CloudLedger(self.store, group, file_id, tools)
                 self.sync_states[group] = "等待首次同步"
                 self.tasks.append(asyncio.create_task(self.sync_loop(group, cloud)))
+        await self.start_form()
         self.tasks.append(asyncio.create_task(self.reminder_loop()))
         self.logger.info(
             "群抽奖模块已加载，腾讯文档同步：%s",
@@ -124,7 +133,13 @@ class RaffleService(FeatureService):
         runner = None
         try:
             origin = form_origin(url)
-            runner = web.AppRunner(create_app(self.store, origin), access_log=None)
+            app = create_app(
+                self.store,
+                origin,
+                resolve_actor=self.web_actor,
+                sync_status=self.web_sync_status,
+            )
+            runner = web.AppRunner(app, access_log=None)
             await runner.setup()
             await web.TCPSite(runner, "0.0.0.0", FORM_PORT).start()
         except Exception as exc:
@@ -136,7 +151,53 @@ class RaffleService(FeatureService):
             return
         self.form_runner = runner
         self.form_url = origin
-        self.logger.info("群抽奖表单已启动，监听端口 %s", FORM_PORT)
+        self.logger.info("群抽奖管理台已启动，监听端口 %s", FORM_PORT)
+
+    def qq_platform(self, platform_id):
+        return next(
+            (
+                item
+                for item in self.context.platform_manager.platform_insts
+                if item.meta().id == platform_id and item.meta().name == "aiocqhttp"
+            ),
+            None,
+        )
+
+    async def web_actor(self, session):
+        if not await self.is_session_enabled(session.group):
+            return None
+        platform_id, _, group = session.group.split(":", 2)
+        platform = self.qq_platform(platform_id)
+        if platform is None:
+            raise QQUnavailable
+        try:
+            async with asyncio.timeout(4):
+                member = await platform.bot.call_action(
+                    "get_group_member_info",
+                    group_id=int(group),
+                    user_id=int(session.qq),
+                    no_cache=True,
+                )
+        except Exception as exc:
+            raise QQUnavailable from exc
+        if (
+            not isinstance(member, Mapping)
+            or str(member.get("group_id")) != group
+            or str(member.get("user_id")) != session.qq
+            or member.get("role") not in {"owner", "admin", "member"}
+        ):
+            return None
+        name = " ".join((member.get("card") or member.get("nickname") or "").split())[
+            :80
+        ]
+        return Actor(
+            session.group, session.qq, name or "群友", member["role"] != "member"
+        )
+
+    def web_sync_status(self, group):
+        file_id = self.document_bindings.get(group)
+        state = self.binding_error or self.sync_states.get(group, "本群未绑定文档")
+        return ((group, file_id) if file_id else None), state
 
     async def terminate(self):
         self.form_url = ""
@@ -188,6 +249,17 @@ class RaffleService(FeatureService):
         now = int(time.time())
         if action == "帮助" or action not in ACTIONS:
             return HELP
+        if action == "管理" and not args:
+            return (
+                f"本群抽奖管理台：{self.form_url}\n打开后选择「通过 QQ 群登录」。"
+                if self.form_url
+                else "抽奖管理台暂未开启，可用 /抽奖 列表 查看记录。"
+            )
+        if action == "登录" and len(args) == 1 and self.form_url:
+            await asyncio.to_thread(WebAuth(self.store).approve, actor, args[0], now)
+            return (
+                "已验证本群身份，请返回生成指令的网页，点击「我已发送，进入管理台」。"
+            )
         if action == "发起":
             if not args and self.form_url:
                 token = await asyncio.to_thread(self.store.new_form, actor, now)
@@ -306,31 +378,74 @@ class RaffleService(FeatureService):
             try:
                 for raffle in await asyncio.to_thread(self.store.due, int(time.time())):
                     await self.remind(raffle)
+                for raffle in await asyncio.to_thread(self.store.pending_notices):
+                    await self.announce(raffle)
             except Exception as exc:
-                self.logger.warning("群抽奖提醒轮询失败 (%s)", type(exc).__name__)
+                self.logger.warning("群抽奖通知轮询失败 (%s)", type(exc).__name__)
             await asyncio.sleep(5)
 
-    async def remind(self, raffle):
-        platform_id, _, group = raffle["scope"].split(":", 2)
-        if not await self.is_session_enabled(raffle["scope"]):
-            return
-        platform = next(
-            (
-                item
-                for item in self.context.platform_manager.platform_insts
-                if item.meta().id == platform_id and item.meta().name == "aiocqhttp"
-            ),
-            None,
-        )
+    async def online_platform(self, scope):
+        platform_id, _, _ = scope.split(":", 2)
+        if not await self.is_session_enabled(scope):
+            return None
+        platform = self.qq_platform(platform_id)
         if platform is None:
-            return
+            return None
         try:
             async with asyncio.timeout(4):
                 status = await platform.bot.call_action("get_status")
             if not isinstance(status, dict) or status.get("online") is False:
-                return
+                return None
         except Exception:
-            return  # No send was attempted; a later poll can try again.
+            return None
+        return platform
+
+    async def announce(self, raffle):
+        platform = await self.online_platform(raffle["scope"])
+        if platform is None or not await asyncio.to_thread(
+            self.store.claim_notice, raffle
+        ):
+            return
+        number = raffle["id"]
+        now = int(time.time())
+        if raffle["kind"] == "网页开奖":
+            text = self.result(raffle, 1)
+        elif raffle["kind"] == "网页取消":
+            text = f"抽奖 #{number}「{raffle['title']}」已从网页管理台取消。"
+        elif now >= raffle["deadline"]:
+            text = f"网页发起的抽奖 #{number}「{raffle['title']}」报名已截止。"
+        else:
+            text = self.created_reply(
+                number,
+                raffle["title"],
+                raffle["slots"],
+                raffle["deadline"],
+                raffle["due"],
+            )
+        group = int(raffle["scope"].rsplit(":", 1)[-1])
+        confirmed = False
+        try:
+            async with asyncio.timeout(12):
+                response = await platform.bot.call_action(
+                    "send_group_msg",
+                    group_id=group,
+                    message=[{"type": "text", "data": {"text": text}}],
+                )
+            confirmed = (
+                isinstance(response, dict) and response.get("message_id") is not None
+            )
+        except Exception:
+            self.logger.warning("抽奖 #%s 网页公告发送状态未确认", number)
+        finally:
+            await asyncio.to_thread(
+                self.store.finish_notice, raffle, int(time.time()), confirmed
+            )
+
+    async def remind(self, raffle):
+        platform = await self.online_platform(raffle["scope"])
+        if platform is None:
+            return
+        group = raffle["scope"].rsplit(":", 1)[-1]
         now = int(time.time())
         if not await asyncio.to_thread(self.store.claim, raffle, now):
             return

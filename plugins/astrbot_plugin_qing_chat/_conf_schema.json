@@ -227,7 +227,7 @@
         "hint": "在 AstrBot 的 MCP 管理中启用该服务。插件复用这条连接，授权在 MCP 服务中配置。"
       },
       "form_url": {
-        "description": "抽奖手机表单地址",
+        "description": "抽奖管理台与手机表单地址",
         "type": "string",
         "default": "",
         "hint": "填 HTTPS 根域名（例如 https://raffle.example.com），再将它反代到 AstrBot 容器内的端口 8769。留空沿用文字指令。"

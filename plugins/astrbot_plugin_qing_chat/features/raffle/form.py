@@ -1,4 +1,4 @@
-"""A small public form that saves drafts. Only the QQ command can publish them."""
+"""A mobile form that saves drafts for publication in QQ or its verified dashboard."""
 
 import asyncio
 import base64
@@ -10,7 +10,8 @@ from urllib.parse import urlsplit
 
 from aiohttp import web
 
-from .store import RaffleError, ZONE, display_time, validate_details
+from .dashboard import add_dashboard
+from .store import ZONE, RaffleError, display_time, validate_details
 
 FORM_PORT = 8769
 SCRIPT = """document.querySelector('#copy').addEventListener('click', async (event) => {
@@ -57,7 +58,7 @@ def page(title, body, status=200):
     html = f"""<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{escape(title)}</title><style>{STYLE}</style>
-<main><h1>{escape(title)}</h1>{body}</main></html>"""
+<main><h1>{escape(title)}</h1>{body}<p><a href="/">返回抽奖管理台</a></p></main></html>"""
     return web.Response(
         text=html,
         status=status,
@@ -73,7 +74,9 @@ def page(title, body, status=200):
 
 
 def editor(now, *, title="", slots="1", deadline="", error=""):
-    when = lambda stamp: datetime.fromtimestamp(stamp, ZONE).strftime("%Y-%m-%dT%H:%M")
+    def when(stamp):
+        return datetime.fromtimestamp(stamp, ZONE).strftime("%Y-%m-%dT%H:%M")
+
     deadline = deadline or when(now + 7200)
     notice = f'<p class="error" role="alert">{escape(error)}</p>' if error else ""
     return page(
@@ -96,11 +99,13 @@ def saved(row):
 <p>抽 {row["slots"]} 人 · {display_time(row["deadline"])} 截止（北京时间）</p>
 <p>请用发起表单的 QQ 号，在原群发送这条指令。</p>
 <label>确认指令<input id="command" readonly value="/抽奖 确认 {escape(row["code"])}"></label>
-<button id="copy" type="button">复制确认指令</button><script>{SCRIPT}</script>""",
+<button id="copy" type="button">复制确认指令</button>
+<p>已通过 QQ 群登录？<a href="/panel/draft">在管理台发布这场抽奖</a></p>
+<script>{SCRIPT}</script>""",
     )
 
 
-def create_app(store, origin):
+def create_app(store, origin, *, resolve_actor=None, sync_status=None):
     async def form(request):
         token = request.match_info["token"]
         now = int(time.time())
@@ -143,7 +148,10 @@ def create_app(store, origin):
         )
 
     app = web.Application(client_max_size=4096)
-    app.router.add_get("/", landing)
+    if resolve_actor is None:
+        app.router.add_get("/", landing)
+    else:
+        add_dashboard(app, store, origin, resolve_actor, sync_status)
     app.router.add_get(r"/f/{token:[A-Za-z0-9_-]{43}}", form, allow_head=False)
     app.router.add_post(r"/f/{token:[A-Za-z0-9_-]{43}}", form)
     return app

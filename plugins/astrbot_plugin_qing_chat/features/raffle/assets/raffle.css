@@ -1,0 +1,92 @@
+:root {
+  color-scheme: light;
+  --ink: #17352e;
+  --muted: #526a60;
+  --green: #176351;
+  --border: #d6e3dc;
+  --paper: #f3f7f4;
+  color: var(--ink);
+  background: var(--paper);
+  font: 16px/1.6 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+header { background: white; border-bottom: 1px solid var(--border); }
+.nav, main { width: min(1080px, 100% - 40px); margin: auto; }
+.nav { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { color: var(--ink); text-decoration: none; font-weight: 780; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.brand span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: #dbeee2; color: var(--green); font-size: 20px; }
+main { padding-block: 32px 60px; }
+p, h1, h2 { margin: 0; }
+h1 { font-size: clamp(1.8rem, 5vw, 2.65rem); line-height: 1.22; overflow-wrap: anywhere; }
+h2 { font-size: 1.1rem; line-height: 1.4; overflow-wrap: anywhere; }
+a { color: var(--green); }
+h1 + p, h2 + p { margin-top: 8px; }
+.identity, .actions, .item-head, .pager { display: flex; align-items: center; gap: 12px; }
+.identity { font-size: .86rem; color: var(--muted); }
+.identity > span { overflow-wrap: anywhere; }
+.intro, .surface, .detail { background: white; border: 1px solid var(--border); border-radius: 18px; padding: clamp(18px, 4vw, 32px); }
+.intro { max-width: 580px; margin: 7vh auto 0; }
+.intro p, .surface p, .muted { color: var(--muted); }
+.intro form, .intro .copy, .intro .actions { margin-top: 20px; }
+.intro .actions form { margin-top: 0; }
+.hero { padding: 24px 32px; display: flex; justify-content: space-between; align-items: end; gap: 16px; border-radius: 18px; background: #143e35; color: #fafefa; }
+.hero p { color: #d1e9dd; }
+.hero .group { font-size: .87rem; margin-bottom: 5px; }
+.hero button { background: #e4f4e8; color: #164033; white-space: nowrap; }
+.sync { margin: 15px 0 23px; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 5px 16px; background: #e8f1eb; border-radius: 10px; color: var(--muted); font-size: .87rem; }
+.sync strong { color: var(--ink); }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.tabs a { text-decoration: none; color: var(--muted); padding: 7px 10px; font-weight: 650; border: 1px solid transparent; border-radius: 8px; }
+.tabs a[aria-current] { background: white; color: var(--green); border-color: var(--border); }
+.tabs a span { margin-left: 3px; font-size: .78rem; }
+.filters { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; margin-bottom: 16px; }
+input, select, button, .button, .secondary { font: inherit; border-radius: 9px; min-height: 42px; padding: 8px 12px; }
+input, select { background: white; color: var(--ink); border: 1px solid #aabeb2; min-width: 0; }
+button, .button, a.secondary { display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; background: var(--green); color: white; text-decoration: none; font-weight: 680; cursor: pointer; }
+button.secondary, a.secondary { color: var(--green); background: white; border-color: #aabeb2; }
+button:hover, .button:hover, .secondary:hover { filter: brightness(.94); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #348e72; outline-offset: 2px; }
+.raffles { padding: 0; margin: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 12px; }
+.raffle a { display: block; height: 100%; padding: 17px 19px; background: white; border: 1px solid var(--border); color: var(--ink); border-radius: 13px; text-decoration: none; }
+.raffle a:hover { border-color: #79a995; }
+.item-head { justify-content: space-between; }
+.raffle h2 { margin: 10px 0 8px; }
+.number, .raffle-meta, .hint { color: var(--muted); font-size: .87rem; }
+.number { font-variant-numeric: tabular-nums; font-weight: 700; }
+.badge { padding: 3px 9px; border-radius: 6px; font-weight: 680; white-space: nowrap; font-size: .81rem; }
+.open { color: #195944; background: #e3f3e9; }
+.closed { color: #725014; background: #fbefd3; }
+.drawn { color: #2e537c; background: #e8f1fb; }
+.cancelled { color: #545e59; background: #e9eeeb; }
+.hint { margin-top: 12px; }
+.pager { justify-content: center; margin-top: 20px; }
+.back { display: inline-block; margin-bottom: 14px; font-weight: 670; text-decoration: none; }
+.detail { margin-bottom: 14px; }
+.detail h1 { margin-top: 12px; font-size: clamp(1.55rem, 4vw, 2.25rem); }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 12px; margin-top: 17px; }
+.facts div { padding: 10px 12px; border-radius: 8px; background: var(--paper); }
+.facts span, .facts strong { display: block; }
+.facts span { color: var(--muted); font-size: .85rem; }
+.actions { flex-wrap: wrap; }
+.detail .actions { margin-top: 15px; }
+.command { width: 100%; font: .92rem/1.5 ui-monospace, monospace; margin-bottom: 8px; }
+.surface { margin-bottom: 12px; }
+.table { overflow-x: auto; margin-top: 10px; }
+table { border-collapse: collapse; width: 100%; text-align: left; font-size: .9rem; }
+th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; vertical-align: top; overflow-wrap: anywhere; }
+th { background: var(--paper); color: var(--muted); }
+th:first-child, td:first-child { white-space: nowrap; }
+.text-link { font-size: .9rem; white-space: nowrap; }
+@media (max-width: 540px) {
+  .nav, main { width: calc(100% - 24px); }
+  main { padding-top: 18px; }
+  .hero { padding: 18px; align-items: start; flex-direction: column; }
+  .filters { grid-template-columns: minmax(0, 1fr) auto; }
+  .filters > input:not([type=hidden]) { grid-column: 1 / -1; }
+  .identity { gap: 6px; }
+  .identity .secondary { min-height: 38px; }
+}
+.compose { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.compose a { color: #ddf3e7; font-size: .9rem; }
+.detail > form { margin-top: 14px; }

@@ -2,69 +2,86 @@
 <html lang="zh-CN">
 <meta charset="utf-8">
 <title>群抽奖怎么用</title>
+<link rel="stylesheet" href="raffle.css">
 <style>
-  * { box-sizing: border-box; }
-  :root { font-family: "PingFang SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif; color: #193b34; background: #ecf4ef; }
-  body { margin: 0; width: 720px; padding: 32px; }
-  h1, h2, p { margin: 0; }
-  .hero { background: #143e35; padding: 28px 30px; border-radius: 24px; color: #fff; }
-  .hero h1 { font-size: 52px; letter-spacing: 1px; line-height: 1.2; }
-  .hero p { color: #d5eee4; margin-top: 10px; font-size: 25px; }
-  .current { display: flex; align-items: center; gap: 18px; background: #d8eadf; border-radius: 15px; padding: 14px 20px; margin: 18px 0 22px; font-size: 24px; font-weight: 600; }
-  code { display: inline-block; font-family: inherit; font-weight: 700; white-space: nowrap; background: #e9f3ee; color: #125745; border-radius: 8px; padding: 3px 10px; }
-  .current code { background: #fff; }
-  .steps { position: relative; display: grid; gap: 16px; }
-  .steps::before { content: ""; position: absolute; left: 24px; top: 27px; bottom: 45px; width: 3px; background: #93b9a4; }
-  .step { position: relative; display: grid; grid-template-columns: 49px 1fr; align-items: start; gap: 15px; }
-  .num { margin-top: 16px; display: grid; place-items: center; width: 49px; height: 49px; border-radius: 50%; background: #205548; color: white; font-size: 25px; font-weight: 700; outline: 5px solid #ecf4ef; }
-  .card { border: 1px solid #d6e5dc; border-radius: 18px; background: #fff; padding: 17px 21px 18px; }
-  .top { display: flex; align-items: center; gap: 13px; margin-bottom: 7px; }
-  h2 { font-size: 30px; line-height: 1.2; }
-  .top code, .early code { font-size: 24px; }
-  .card p { font-size: 23px; line-height: 1.45; color: #344f47; }
-  .card p + p { margin-top: 3px; }
-  .card b { color: #193b34; }
-  .early { background: #fff2db; border-radius: 9px; padding: 6px 10px; margin-top: 9px !important; }
-  .early code { background: transparent; padding: 0; color: #6f4a11; }
-  .more { margin-top: 20px; background: #f9fcfa; border-radius: 14px; padding: 11px 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .more div { padding: 4px 6px; font-size: 20px; color: #344f47; }
-  .more code { font-size: 22px; }
-  .text { margin-top: 11px; color: #496958; padding-left: 5px; font-size: 20px; }
+  body { width: 720px; font-family: "PingFang SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif; }
+  .help-brand { display: flex; align-items: center; gap: 12px; padding: 16px 32px; border-bottom: 1px solid var(--dashboard-line); background: var(--dashboard-surface); font-size: 23px; font-weight: 700; }
+  .help-brand .brand-icon { width: 40px; height: 40px; border-radius: 12px; }
+  .help-brand svg { width: 24px; height: 24px; }
+  .help-main { padding: 25px 32px 24px; }
+  .help-heading { margin-bottom: 19px; }
+  .help-heading h1 { font-size: 45px; line-height: 1.22; }
+  .help-heading p { margin-top: 5px; color: var(--color-text-secondary); font-size: 23px; }
+  .help-current { padding: 15px 18px; display: flex; align-items: center; gap: 17px; margin-bottom: 18px; font-size: 23px; }
+  .help-command, .help-primary { display: inline-block; padding: 3px 10px; border-radius: 8px; white-space: nowrap; font: inherit; font-weight: 650; }
+  .help-command { background: var(--color-status-blue-background); color: var(--color-status-blue-text); }
+  .help-primary { padding-inline: 14px; background: var(--color-accent-700); color: white; }
+  .help-steps { list-style: none; }
+  .help-step { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 13px; padding: 16px 18px; }
+  .help-step + .help-step { border-top: 1px solid var(--dashboard-line); }
+  .help-number { display: grid; place-items: center; align-self: start; min-height: 35px; border-radius: 9px; background: var(--color-background-secondary-default); color: var(--color-text-secondary); font-size: 21px; font-weight: 650; }
+  .help-step-heading { display: flex; align-items: center; gap: 13px; margin: 0 0 6px; font-size: 22px; }
+  .help-step h2 { font-size: 28px; }
+  .help-step p, .help-early { color: var(--color-text-secondary); font-size: 23px; line-height: 1.46; }
+  .help-step b { color: var(--color-text-primary); font-weight: 650; }
+  .help-early { margin-top: 9px; padding: 7px 11px; border-radius: 8px; background: var(--color-status-yellow-background); }
+  .help-early b { color: var(--color-status-yellow-text); }
+  .help-links { display: grid; grid-template-columns: 1fr 1fr; margin-top: 18px; font-size: 21px; }
+  .help-links div { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; padding: 13px 15px; }
+  .help-links div + div { border-inline-start: 1px solid var(--dashboard-line); }
+  .help-text { margin-top: 13px; font-size: 20px; color: var(--color-text-secondary); }
+  .help-text code { font: inherit; color: var(--color-status-blue-text); }
 </style>
-<main>
-  <header class="hero"><h1>群抽奖怎么用</h1><p>在 QQ 群里发这些指令</p></header>
-  <section class="current"><code>/抽奖</code><span>查看本群正在报名的场次</span></section>
-  <section class="steps">
-    <article class="step">
-      <span class="num">1</span>
-      <div class="card">
-        <div class="top"><h2>发起</h2><code>/抽奖 发起</code></div>
-        <p>打开链接，填奖品、中奖人数和截止时间。</p>
-        <p>把页面生成的确认指令发回原群，即可发布。</p>
-      </div>
-    </article>
-    <article class="step">
-      <span class="num">2</span>
-      <div class="card">
-        <div class="top"><h2>报名</h2><code>/抽奖 报名</code></div>
-        <p><b>一场</b>　直接报名</p>
-        <p><b>多场</b>　2 分钟内新发一条数字消息，比如 <b>12</b></p>
-        <p>直接发数字，别引用回复或 @ 机器人。</p>
-      </div>
-    </article>
-    <article class="step">
-      <span class="num">3</span>
-      <div class="card">
-        <div class="top"><h2>开奖</h2><code>/抽奖 开奖</code></div>
-        <p>发起人开奖，有多场时按提示加场次编号。</p>
-        <p class="early"><b>提前开</b>　按提示在 2 分钟内发 <code>/抽奖 确认</code></p>
-      </div>
-    </article>
-  </section>
-  <section class="more">
-    <div><code>/抽奖管理</code>　网页入口</div>
-    <div><code>/抽奖 结果 12</code>　查结果</div>
-  </section>
-  <p class="text">完整文字版　/抽奖 帮助 文字</p>
-</main>
+<body>
+  <header class="help-brand">
+    <span class="brand-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 5.5h18v4a2.5 2.5 0 0 0 0 5v4H3v-4a2.5 2.5 0 0 0 0-5zM9 8.5v.5m0 2.75v.5m0 2.75v.5" />
+      </svg>
+    </span>
+    QQ 群抽奖
+  </header>
+  <main class="help-main">
+    <header class="help-heading">
+      <h1>群抽奖怎么用</h1>
+      <p>在 QQ 群里发以下指令</p>
+    </header>
+    <section class="surface help-current">
+      <code class="help-primary">/抽奖</code>
+      <span>查看本群正在报名的抽奖</span>
+    </section>
+    <ol class="surface help-steps">
+      <li class="help-step">
+        <span class="help-number" aria-hidden="true">1</span>
+        <div>
+          <div class="help-step-heading"><h2>发起</h2><code class="help-command">/抽奖 发起</code></div>
+          <p>打开链接，填写奖品、中奖人数和截止时间。</p>
+          <p>按页面提示在原群确认，或从管理台发布。</p>
+        </div>
+      </li>
+      <li class="help-step">
+        <span class="help-number" aria-hidden="true">2</span>
+        <div>
+          <div class="help-step-heading"><h2>报名</h2><code class="help-command">/抽奖 报名</code></div>
+          <p><b>一场</b>　自动报名</p>
+          <p><b>多场</b>　2 分钟内单独发场次编号，如 <b>12</b></p>
+          <p>直接发数字，别引用回复或 @ 机器人。</p>
+        </div>
+      </li>
+      <li class="help-step">
+        <span class="help-number" aria-hidden="true">3</span>
+        <div>
+          <div class="help-step-heading"><h2>开奖</h2><code class="help-command">/抽奖 开奖</code></div>
+          <p>发起人开奖。多场时按提示指定编号。</p>
+          <div class="help-early"><b>提前开奖</b>　按提示在 2 分钟内发 <b>/抽奖 确认</b></div>
+        </div>
+      </li>
+    </ol>
+    <section class="surface help-links" aria-label="查询与管理">
+      <div><code class="help-command">/抽奖管理</code> 网页入口</div>
+      <div><code class="help-command">/抽奖 结果 12</code> 查结果</div>
+    </section>
+    <p class="help-text">完整文字版　<code>/抽奖 帮助 文字</code></p>
+  </main>
+</body>
 </html>

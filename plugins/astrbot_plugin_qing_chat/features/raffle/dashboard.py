@@ -28,7 +28,8 @@ from .web_records import (
 HEADERS = {
     "Cache-Control": "no-store",
     "Content-Security-Policy": "default-src 'none'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
-    "Referrer-Policy": "no-referrer",
+    # Native form submissions must retain their Origin for the same-origin check.
+    "Referrer-Policy": "same-origin",
     "X-Content-Type-Options": "nosniff",
 }
 EXPORTS = {"participants": "导出名单", "audit": "导出流水"}

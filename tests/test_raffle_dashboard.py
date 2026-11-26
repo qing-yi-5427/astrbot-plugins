@@ -47,6 +47,7 @@ async def sign_in(client, service, actor):
     path = "/a/" + token
     preview = await client.get(path)
     assert preview.status == 200 and not preview.cookies
+    assert preview.headers["Referrer-Policy"] == "same-origin"
     response = await client.post(
         path, headers={"Origin": ORIGIN}, allow_redirects=False
     )

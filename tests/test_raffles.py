@@ -299,6 +299,7 @@ async def test_form_to_qq_confirmation_is_scoped_and_one_time(storage, monkeypat
         preview = await client.get(path)
         assert "中奖人数" in await preview.text()
         assert preview.headers["Cache-Control"] == "no-store"
+        assert preview.headers["Referrer-Policy"] == "same-origin"
         assert (
             await client.post(path, data=data, headers={"Origin": "https://other.test"})
         ).status == 403

@@ -65,7 +65,7 @@ def page(title, body, status=200):
         content_type="text/html",
         headers={
             "Cache-Control": "no-store",
-            "Referrer-Policy": "no-referrer",
+            "Referrer-Policy": "same-origin",
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "DENY",
             "Content-Security-Policy": f"default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-{SCRIPT_HASH}'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",

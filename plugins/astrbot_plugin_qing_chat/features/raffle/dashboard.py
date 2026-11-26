@@ -425,6 +425,7 @@ class Dashboard:
             return failure
         number = page_number(request)
         source = request.query.get("source", "")
+        rank_query = request.query.get("nickname", "").strip()[:120]
         if source not in {"archive", "live"}:
             source = ""
         stats, rows, rankings = await asyncio.to_thread(
@@ -434,10 +435,13 @@ class Dashboard:
             int(time.time()),
             page=number,
             source=source,
+            rank_query=rank_query,
         )
 
         def link(next_page):
             query = {"source": source} if source else {}
+            if rank_query:
+                query["nickname"] = rank_query
             if next_page > 1:
                 query["page"] = str(next_page)
             return "/panel/summary" + ("?" + urlencode(query) if query else "")
@@ -449,6 +453,7 @@ class Dashboard:
                 "stats": stats,
                 "rankings": rankings,
                 "rank_limit": RANK_LIMIT,
+                "rank_query": rank_query,
                 "rows": rows[:PAGE_SIZE],
                 "source": source,
                 "pager": pagination(number, len(rows) > PAGE_SIZE, link),

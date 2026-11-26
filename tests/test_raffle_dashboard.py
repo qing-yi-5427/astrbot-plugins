@@ -146,12 +146,24 @@ async def test_summary_import_is_group_scoped_and_includes_live_result(raffle):
         assert [row["source_row"] for row in data["rows"]] == [8, 7]
         assert data["rows"][0]["winners"] == []
         assert data["rows"][1]["winners"] == ["甲"]
+        response = await client.get(
+            "/panel/summary", params={"nickname": "乙"}, headers=headers
+        )
+        search = page_model(await response.text())["data"]
+        assert search["rank_query"] == "乙"
+        assert search["rankings"]["matches"] == [
+            {"name": "乙", "entered": 22, "awarded": 0}
+        ]
+        assert search["pager"]["next"] == "/panel/summary?nickname=%E4%B9%99&page=2"
         other_headers = await sign_in(client, service, OTHER)
         response = await client.get(
-            "/panel/summary?source=archive", headers=other_headers
+            "/panel/summary",
+            params={"source": "archive", "nickname": "乙"},
+            headers=other_headers,
         )
         other = page_model(await response.text())["data"]
         assert other["stats"]["archive"] == 0 and other["rows"] == []
+        assert other["rankings"]["matches"] == []
 
 
 def test_web_invite_expiration_replacement_and_session_revoke(raffle):

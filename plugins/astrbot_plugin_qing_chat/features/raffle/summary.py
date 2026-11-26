@@ -19,11 +19,11 @@ def public_name(name):
     return re.sub(r"(?<!\d)\d{5,}(?!\d)", "•••", " ".join(name.split())) or "群友"
 
 
-def ranked(counts, names):
+def ranked(counts, names, limit):
     order = sorted(counts, key=lambda key: (-counts[key], name_key(names[key]), key))
     rank, previous = 0, None
     rows = []
-    for position, key in enumerate(order[:RANK_LIMIT], 1):
+    for position, key in enumerate(order[:limit], 1):
         count = counts[key]
         if count != previous:
             rank, previous = position, count
@@ -31,10 +31,17 @@ def ranked(counts, names):
     return rows
 
 
-def leaderboards(live, archive):
+def leaderboards(live, archive, *, limit=RANK_LIMIT, search=""):
     names = {}
     aliases = defaultdict(set)
     entered, awarded = Counter(), Counter()
+    term = name_key(search)
+    matched = {}
+
+    def match(identity, name):
+        key = name_key(public_name(name))
+        if term in key:
+            matched[identity] = matched.get(identity, False) or term == key
 
     # Live rows are newest first. Keep each QQ identity separate and use its
     # latest recorded display name. Only a unique alias can join an old entry.
@@ -45,6 +52,8 @@ def leaderboards(live, archive):
             alias = name_key(person["name"])
             if alias and alias != "群友":
                 aliases[alias].add(identity)
+            if term:
+                match(identity, person["name"])
             entered[identity] += 1
         for person in winners:
             awarded[("qq", person["qq"])] += 1
@@ -52,16 +61,40 @@ def leaderboards(live, archive):
     def history_identity(name):
         alias = name_key(name)
         if len(aliases.get(alias, ())) == 1:
-            return next(iter(aliases[alias]))
-        identity = ("name", alias)
+            identity = next(iter(aliases[alias]))
+        else:
+            identity = ("name", alias)
         names.setdefault(identity, name)
+        if term:
+            match(identity, name)
         return identity
 
     for entrants, winners in archive:
         entered.update({history_identity(name) for name in entrants if name_key(name)})
         awarded.update({history_identity(name) for name in winners if name_key(name)})
 
-    return {"entered": ranked(entered, names), "awarded": ranked(awarded, names)}
+    matches = sorted(
+        matched,
+        key=lambda key: (
+            not matched[key],
+            -entered[key],
+            -awarded[key],
+            name_key(names[key]),
+            key,
+        ),
+    )
+    return {
+        "entered": ranked(entered, names, limit),
+        "awarded": ranked(awarded, names, limit),
+        "matches": [
+            {
+                "name": public_name(names[key]),
+                "entered": entered[key],
+                "awarded": awarded[key],
+            }
+            for key in matches
+        ],
+    }
 
 
 def import_history(store, group, sources, exclusions=()):
@@ -94,7 +127,7 @@ def import_history(store, group, sources, exclusions=()):
         )
 
 
-def group_summary(store, group, now, *, page=None, source=""):
+def group_summary(store, group, now, *, page=None, source="", rank_query=""):
     with store.transaction() as db:
         live = db.execute(
             """SELECT r.id, r.title, r.status, r.deadline, r.winners,
@@ -168,5 +201,10 @@ def group_summary(store, group, now, *, page=None, source=""):
     return (
         stats,
         details[start : start + PAGE_SIZE + 1],
-        leaderboards(live_people, archive_people),
+        leaderboards(
+            live_people,
+            archive_people,
+            limit=RANK_LIMIT if page is None else None,
+            search=rank_query,
+        ),
     )

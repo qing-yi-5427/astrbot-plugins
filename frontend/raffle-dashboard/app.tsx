@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
   RiAddLine, RiArrowLeftLine, RiArrowRightUpLine, RiCoupon3Line,
@@ -37,10 +37,12 @@ type SummaryRecord = {
   title: string; source: string; deadline: string; people: number; winners: string[];
 } & ({ id: number; state: State } | { id: null; source_row: number; organizer: string });
 type Rank = { rank: number; name: string; count: number };
+type RankMatch = { name: string; entered: number; awarded: number };
 type Summary = View<"summary", {
   stats: { total: number; live: number; archive: number; people: number; with_results: number; winners: number };
   rows: SummaryRecord[]; source: "" | "archive" | "live"; pager: Pager;
-  rankings: { entered: Rank[]; awarded: Rank[] }; rank_limit: number;
+  rankings: { entered: Rank[]; awarded: Rank[]; matches: RankMatch[] };
+  rank_limit: number; rank_query: string;
 }>;
 type Raffle = View<"raffle", {
   id: number; state: State; own: number | null; people: number; slots: number; deadline: string;
@@ -274,11 +276,20 @@ function SummaryResult({ row, showLabel }: { row: SummaryRecord; showLabel?: boo
   return row.id === null ? <span className="soft">未登记结果</span> : <Status value={row.state} />;
 }
 
-function Leaderboard({ title, rows }: { title: string; rows: Rank[] }) {
+function Leaderboard({ title, rows, limit }: { title: string; rows: Rank[]; limit: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const listId = useId();
+  const visible = expanded ? rows : rows.slice(0, limit);
   return <section className="surface leaderboard" aria-label={title}>
-    <div className="section-heading"><h2>{title}</h2></div>
-    {rows.length ? <ol className="rank-list" aria-label={title}>
-      {rows.map((row, index) => <li key={index}>
+    <div className="section-heading">
+      <h2>{title}</h2>
+      {rows.length > limit && <Button type="button" variant="secondary" size="small"
+        aria-expanded={expanded} aria-controls={listId} onClick={() => setExpanded(!expanded)}>
+        {expanded ? "收起榜单" : `查看全部 ${rows.length} 人`}
+      </Button>}
+    </div>
+    {rows.length ? <ol id={listId} className="rank-list" aria-label={title}>
+      {visible.map((row, index) => <li key={index}>
         <Counter className={cx("rank-place", row.rank <= 3 && "rank-place-prominent")}>
           <span className="sr-only">第 </span>{row.rank}<span className="sr-only"> 名</span>
         </Counter>
@@ -289,8 +300,36 @@ function Leaderboard({ title, rows }: { title: string; rows: Rank[] }) {
   </section>;
 }
 
+function NicknameSearch({ query, matches, source }: { query: string; matches: RankMatch[]; source: string }) {
+  return <section className="surface nickname-search" id="nickname-search" aria-label="查群友统计">
+    <div className="section-heading"><h2>查群友统计</h2></div>
+    <form className="nickname-form" action="/panel/summary#nickname-search" method="get">
+      {source && <input type="hidden" name="source" value={source} />}
+      <SearchField name="nickname" defaultValue={query} aria-label="群友昵称"
+        className="nickname-field" placeholder="输入完整或部分昵称" clearLabel="清空昵称" shape="rounded" />
+      <Button type="submit" variant="secondary">搜索</Button>
+      {query && <ButtonLink href={source ? `/panel/summary?source=${source}#nickname-search` : "/panel/summary#nickname-search"}
+        variant="ghost">清除搜索</ButtonLink>}
+    </form>
+    {query && (matches.length ? <Table aria-label="昵称搜索结果" size="sm">
+      <TableHeader>
+        <TableColumn id="name" isRowHeader>昵称</TableColumn>
+        <TableColumn id="entered">参与次数</TableColumn>
+        <TableColumn id="awarded">中奖次数</TableColumn>
+      </TableHeader>
+      <TableBody>
+        {matches.map((row, index) => <TableRow key={index}>
+          <TableCell>{row.name}</TableCell>
+          <TableCell>{row.entered} 次</TableCell>
+          <TableCell>{row.awarded} 次</TableCell>
+        </TableRow>)}
+      </TableBody>
+    </Table> : <p className="table-empty" role="status">未找到匹配的昵称</p>)}
+  </section>;
+}
+
 function SummaryPage({ model }: { model: Summary }) {
-  const { stats, rows, source, pager, rankings, rank_limit } = model.data;
+  const { stats, rows, source, pager, rankings, rank_limit, rank_query } = model.data;
   const metrics = [
     ["抽奖总场次", stats.total], ["累计参与人次", stats.people],
     ["有结果的场次", stats.with_results], ["记录中奖人次", stats.winners],
@@ -301,6 +340,12 @@ function SummaryPage({ model }: { model: Summary }) {
     { key: "live", label: "机器人", count: stats.live },
   ];
   const rowKey = (row: SummaryRecord) => row.id ?? `${row.source}:${row.source_row}`;
+  const sourceHref = (key: string) => {
+    const params = new URLSearchParams();
+    if (key) params.set("source", key);
+    if (rank_query) params.set("nickname", rank_query);
+    return "/panel/summary" + (params.size ? `?${params}` : "");
+  };
   return <>
     <div className="page-heading">
       <div><h1>抽奖总结</h1><p className="summary-description">云文档历史和本群机器人抽奖 · 参与按各场人次累计</p></div>
@@ -311,16 +356,17 @@ function SummaryPage({ model }: { model: Summary }) {
         <dt>{label}</dt><dd>{value.toLocaleString("zh-CN")}</dd>
       </div>)}
     </dl>
+    <NicknameSearch query={rank_query} matches={rankings.matches} source={source} />
     <section className="summary-rankings" aria-label="群友排行榜">
-      <Leaderboard title="参与次数榜" rows={rankings.entered} />
-      <Leaderboard title="中奖次数榜" rows={rankings.awarded} />
-      <p className="summary-description rank-note">各榜前 {rank_limit} 位 · 并列同名次 · 历史按登记昵称统计</p>
+      <Leaderboard title="参与次数榜" rows={rankings.entered} limit={rank_limit} />
+      <Leaderboard title="中奖次数榜" rows={rankings.awarded} limit={rank_limit} />
+      <p className="summary-description rank-note">同次数并列 · 历史按登记昵称统计</p>
     </section>
     <section className="surface" id="summary-records">
       <div className="section-heading"><h2>场次明细</h2></div>
       <nav className="summary-filter" aria-label="记录来源">
         {sections.map(({ key, label, count }) => <ButtonLink key={key} size="small"
-          href={key ? `/panel/summary?source=${key}` : "/panel/summary"}
+          href={sourceHref(key)}
           variant={key === source ? "ghost" : "secondary"} aria-current={key === source ? "page" : undefined}>
           {label} {count}
         </ButtonLink>)}

@@ -34,7 +34,7 @@ LEGACY_IDS = {
 TOOL_NAME = "astrbot_generate_image"
 
 
-@register("astrbot_plugin_qing_chat", "qingyi", "对话管理", "1.10.0")
+@register("astrbot_plugin_qing_chat", "qingyi", "对话管理", "1.11.0")
 class Main(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context, config)

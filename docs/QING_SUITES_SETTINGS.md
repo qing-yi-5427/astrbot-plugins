@@ -59,7 +59,7 @@ AstrBot 网页端打开 **插件**，找到 **对话管理** 或 **图片与主�
 
 网页的「抽奖总结」合并本群机器人记录和已导入的腾讯文档历史快照，支持按来源查看场次。参与和中奖按人次累计。历史表格里没有填中奖人的场次显示「未登记结果」。历史快照独立保存在 SQLite 中，导入过程只读云文档。
 
-QQ 总结图和网页均显示参与榜及中奖榜前 10 位，同次数并列。排行中每人每场最多各记一次。机器人记录按 QQ 账号统计，历史记录按登记昵称统计。历史昵称只在唯一匹配到机器人记录中的同名账号时合并。
+QQ 总结图显示参与榜和中奖榜前 10 位。网页总结页可以展开两张完整榜单，也可以用完整或部分昵称一起查询参与和中奖次数。排行中每人每场最多各记一次，同次数并列。机器人记录按 QQ 账号统计，历史记录按登记昵称统计。历史昵称只在唯一匹配到机器人记录中的同名账号时合并。
 
 抽奖后台的前端位于 `frontend/raffle-dashboard`，使用 [BoardUI](https://www.boardui.com/components) 的 MIT 基础组件。修改后在仓库根目录执行 `npm --prefix frontend/raffle-dashboard ci`、`npm --prefix frontend/raffle-dashboard run check` 和 `npm --prefix frontend/raffle-dashboard run build`，将构建后的静态资产与插件一并打包。AstrBot 直接提供这些资产。
 

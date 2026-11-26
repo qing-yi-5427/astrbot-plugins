@@ -425,6 +425,7 @@ def test_raffle_leaderboards_have_one_entry_per_raffle_and_keep_ambiguous_names(
             ([" ＡＬＰＨＡ ", "alpha", "小满", "100001234"], ["Alpha", "alpha"]),
             (["小满"], ["仅登记获奖"]),
         ],
+        search="ｐＨａ",
     )
     assert rankings["entered"][0] == {"rank": 1, "name": "阿尔法", "count": 3}
     assert rankings["entered"][1] == {"rank": 2, "name": "小满", "count": 2}
@@ -433,6 +434,18 @@ def test_raffle_leaderboards_have_one_entry_per_raffle_and_keep_ambiguous_names(
     assert rankings["awarded"][0] == {"rank": 1, "name": "阿尔法", "count": 2}
     assert {row["name"] for row in rankings["awarded"][1:]} == {"小满", "仅登记获奖"}
     assert [row["rank"] for row in rankings["awarded"]] == [1, 2, 2]
+    assert rankings["matches"] == [{"name": "阿尔法", "entered": 3, "awarded": 2}]
+
+
+def test_raffle_leaderboards_show_later_ties_and_search_members_outside_top_ten():
+    people = [f"群友 {number:02}" for number in range(1, 14)]
+    archive = [(people, people[:-1])]
+    limited = leaderboards([], archive)
+    assert len(limited["entered"]) == len(limited["awarded"]) == 10
+    full = leaderboards([], archive, limit=None, search="友 13")
+    assert len(full["entered"]) == 13 and len(full["awarded"]) == 12
+    assert full["entered"][-1]["rank"] == full["awarded"][-1]["rank"] == 1
+    assert full["matches"] == [{"name": "群友 13", "entered": 1, "awarded": 0}]
 
 
 @pytest.mark.asyncio

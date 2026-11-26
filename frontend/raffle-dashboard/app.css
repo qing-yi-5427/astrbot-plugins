@@ -85,6 +85,13 @@ p { overflow-wrap: anywhere; }
 .summary-heading-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .4rem; }
 .merge-form { display: grid; grid-template-columns: repeat(2, minmax(10rem, 18rem)) max-content; align-items: end; gap: .75rem; padding: 1rem; }
 .merge-field { display: grid; gap: .4rem; min-width: 0; font-size: .875rem; font-weight: 600; }
+.nickname-picker-toggle { display: grid; place-items: center; width: 1.75rem; height: 1.75rem; border-radius: .4rem; color: var(--color-text-secondary); }
+.nickname-picker-toggle:hover, .nickname-picker-toggle[data-pressed] { background: var(--color-background-tertiary-hover); }
+.nickname-picker-toggle svg { width: 1rem; height: 1rem; }
+.nickname-picker-popover { width: var(--trigger-width); min-width: 10rem; padding: .35rem; }
+.nickname-picker-popover [role="listbox"] { max-height: min(15rem, 40dvh); overflow-y: auto; overscroll-behavior: contain; }
+.nickname-picker-popover [role="option"] { overflow-wrap: anywhere; }
+.merge-form-hint { grid-column: 1 / -1; color: var(--color-text-secondary); font-size: .85rem; }
 .merge-rules { list-style: none; }
 .merge-rules li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .65rem 1rem; border-top: 1px solid var(--dashboard-line); font-size: .875rem; }
 .merge-rules li > div { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .55rem; min-width: 0; overflow-wrap: anywhere; }

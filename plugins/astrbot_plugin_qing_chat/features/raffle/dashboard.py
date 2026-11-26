@@ -19,7 +19,7 @@ from .summary import (
     RANK_LIMIT,
     group_summary,
     merge_nickname,
-    nickname_merges,
+    nickname_admin_data,
     undo_nickname_merge,
 )
 from .web_auth import COOKIE, INVITE_TTL, SESSION_TTL, WebAuth
@@ -486,12 +486,12 @@ class Dashboard:
         actor, failure = await self.nickname_admin(request)
         if failure is not None:
             return failure
-        rules = await asyncio.to_thread(nickname_merges, self.store, actor.group)
+        data = await asyncio.to_thread(nickname_admin_data, self.store, actor.group)
         feedback = {"merged": "合并已生效。", "undone": "已撤销这条合并。"}
         return page(
             "合并历史昵称",
             "nicknames",
-            {"rules": rules, "message": feedback.get(request.query.get("change"))},
+            {**data, "message": feedback.get(request.query.get("change"))},
             account=self.account(request, actor),
         )
 
@@ -501,14 +501,20 @@ class Dashboard:
         if failure is not None:
             return failure
         form = await request.post()
-        old, target = form.get("old"), form.get("target")
+        selected = "old_choice" in form or "target_choice" in form
+        fields = ("old_choice", "target_choice") if selected else ("old", "target")
+        old, target = (form.get(field) for field in fields)
         if any(
             not isinstance(value, str) or len(value) > 200 for value in (old, target)
         ):
             raise web.HTTPBadRequest(headers=HEADERS)
+        if selected and any(
+            not re.fullmatch(r"[0-9a-f]{32}", value) for value in (old, target)
+        ):
+            raise web.HTTPBadRequest(headers=HEADERS)
         try:
             await asyncio.to_thread(
-                merge_nickname, self.store, actor.group, old, target
+                merge_nickname, self.store, actor.group, old, target, selected=selected
             )
         except RaffleError as exc:
             return operation_error(

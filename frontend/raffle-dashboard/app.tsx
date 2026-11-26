@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { Button as AriaButton, ComboBox, ListBox, Popover } from "react-aria-components";
 import {
   RiAddLine, RiArrowLeftLine, RiArrowRightLine, RiArrowRightUpLine, RiCoupon3Line,
   RiDownload2Line, RiFileEditLine, RiGroupLine, RiInbox2Line,
@@ -8,11 +9,14 @@ import {
 import { Counter } from "@/components/base/badges/counter";
 import { Button, ButtonLink, type ButtonProps } from "@/components/base/buttons/button";
 import { InputBase } from "@/components/base/input/input";
+import { Label } from "@/components/base/input/label";
+import { MENU_ITEMS_CONTAINER, MENU_POPOVER_SURFACE } from "@/components/base/dropdown/menu-styles";
 import { SearchField } from "@/components/base/search-field/search-field";
 import { Select, SelectItem } from "@/components/base/select/select";
 import { Table, TableBody, TableCell, TableColumn, TableHeader, TableRow } from "@/components/base/table/table";
 import { Tabs, Tab, TabList, TabPanel } from "@/components/base/tabs/tabs";
 import { DirectionProvider } from "@/components/foundations/direction/direction";
+import { ChevronDownSmall } from "@/components/foundations/icons/chevrons";
 import { cx } from "@/utils/cx";
 import "@/styles/globals.css";
 import "./app.css";
@@ -54,8 +58,10 @@ type Raffle = View<"raffle", {
   } | null;
 }>;
 type Draft = View<"draft", { draft: { title: string; code: string; slots: number; deadline: string } | null }>;
+type NicknameOption = { id: string; label: string };
 type Nicknames = View<"nicknames", {
   rules: { id: number; old: string; target: string }[]; message: string | null;
+  old_options: NicknameOption[]; target_options: NicknameOption[];
 }>;
 type Notice = View<"notice", { message: string; action: Action | null; back: Action | null }>;
 type Pairing = View<"pairing", { command: string }>;
@@ -409,9 +415,44 @@ function SummaryPage({ model }: { model: Summary }) {
   </>;
 }
 
+function NicknamePicker({ label, field, options, selected, onSelect }: {
+  label: string; field: string; options: NicknameOption[];
+  selected: NicknameOption | null; onSelect: (value: NicknameOption | null) => void;
+}) {
+  const [input, setInput] = useState("");
+  const normalize = (value: string) => value.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+  return <ComboBox className="merge-field" name={field} formValue="key" menuTrigger="focus"
+    selectedKey={selected?.id ?? null} inputValue={input} defaultItems={options}
+    defaultFilter={(name, query) => normalize(name).includes(normalize(query))}
+    isDisabled={!options.length} allowsEmptyCollection
+    onInputChange={(next) => {
+      setInput(next);
+      if (next !== selected?.label) onSelect(null);
+    }}
+    onSelectionChange={(key) => {
+      const option = options.find((value) => value.id === key) ?? null;
+      onSelect(option);
+      setInput(option?.label ?? "");
+    }}>
+    <Label>{label}</Label>
+    <InputBase placeholder={options.length ? "输入昵称搜索" : "暂无可选昵称"} autoComplete="off"
+      trailingAddon={<AriaButton className="nickname-picker-toggle" aria-label={`展开${label}候选`}>
+        <ChevronDownSmall aria-hidden />
+      </AriaButton>} />
+    <Popover className={cx(MENU_POPOVER_SURFACE, "nickname-picker-popover")} offset={4}>
+      <ListBox className={MENU_ITEMS_CONTAINER} renderEmptyState={() => <p className="table-empty">未找到匹配昵称</p>}>
+        {(option: NicknameOption) => <SelectItem id={option.id} textValue={option.label}>{option.label}</SelectItem>}
+      </ListBox>
+    </Popover>
+  </ComboBox>;
+}
+
 function NicknamesPage({ model }: { model: Nicknames }) {
-  const { rules, message } = model.data;
+  const { rules, message, old_options, target_options } = model.data;
   const csrf = model.account?.csrf;
+  const [old, selectOld] = useState<NicknameOption | null>(null);
+  const [target, selectTarget] = useState<NicknameOption | null>(null);
+  const same = old !== null && old.id === target?.id;
   return <>
     <Back href="/panel/summary" label="抽奖总结" />
     <div className="page-heading">
@@ -423,15 +464,10 @@ function NicknamesPage({ model }: { model: Nicknames }) {
     <section className="surface nickname-search" aria-label="添加合并">
       <form method="post" action="/panel/summary/nicknames" className="merge-form">
         <input type="hidden" name="csrf" value={csrf} />
-        <div className="merge-field">
-          <label htmlFor="merge-old">旧昵称</label>
-          <InputBase id="merge-old" name="old" placeholder="旧表里的完整昵称" maxLength={200} required autoComplete="off" />
-        </div>
-        <div className="merge-field">
-          <label htmlFor="merge-target">归入昵称</label>
-          <InputBase id="merge-target" name="target" placeholder="旧表或机器人记录里的完整昵称" maxLength={200} required autoComplete="off" />
-        </div>
-        <Button type="submit">合并昵称</Button>
+        <NicknamePicker label="旧昵称" field="old_choice" options={old_options} selected={old} onSelect={selectOld} />
+        <NicknamePicker label="归入昵称" field="target_choice" options={target_options} selected={target} onSelect={selectTarget} />
+        <Button type="submit" disabled={!old || !target || same}>合并昵称</Button>
+        {same && <p className="merge-form-hint" role="status">请选择两个不同的昵称。</p>}
       </form>
     </section>
     <section className="surface" aria-label="已有合并">

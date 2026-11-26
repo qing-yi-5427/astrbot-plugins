@@ -20,6 +20,7 @@ from astrbot_plugin_qing_chat.features.raffle.summary import (
     group_summary,
     import_history,
     merge_nickname,
+    nickname_admin_data,
 )
 from astrbot_plugin_qing_chat.features.raffle.web_auth import (
     COOKIE,
@@ -224,7 +225,18 @@ async def test_admin_nickname_merge_recalculates_rankings_and_can_be_undone(raff
 
         headers = await sign_in(client, service, ADMIN)
         panel = await client.get(path, headers=headers)
-        data["csrf"] = page_model(await panel.text())["account"]["csrf"]
+        admin = page_model(await panel.text())
+        source_ids = {
+            item["label"]: item["id"] for item in admin["data"]["old_options"]
+        }
+        target_ids = {
+            item["label"]: item["id"] for item in admin["data"]["target_options"]
+        }
+        data = {
+            "old_choice": source_ids["旧名字"],
+            "target_choice": target_ids["新名字"],
+            "csrf": admin["account"]["csrf"],
+        }
         bad_origin = {**headers, "Origin": "https://elsewhere.example"}
         assert (await client.post(path, headers=bad_origin, data=data)).status == 403
         result = await client.post(path, headers=headers, data=data)
@@ -232,8 +244,17 @@ async def test_admin_nickname_merge_recalculates_rankings_and_can_be_undone(raff
         assert model["data"]["message"] == "合并已生效。"
         rule = model["data"]["rules"][0]
         assert rule["old"] == "旧名字" and rule["target"] == "新名字"
+        assert [option["label"] for option in model["data"]["old_options"]] == [
+            "新名字"
+        ]
         result = await client.post(
-            path, headers=headers, data={**data, "old": "新名字", "target": "旧名字"}
+            path,
+            headers=headers,
+            data={
+                **data,
+                "old_choice": source_ids["新名字"],
+                "target_choice": target_ids["旧名字"],
+            },
         )
         assert result.status == 409
         report = await client.get(
@@ -251,6 +272,12 @@ async def test_admin_nickname_merge_recalculates_rankings_and_can_be_undone(raff
         panel = await client.get(path, headers=other_headers)
         other_model = page_model(await panel.text())
         assert other_model["data"]["rules"] == []
+        response = await client.post(
+            path,
+            headers=other_headers,
+            data={**data, "csrf": other_model["account"]["csrf"]},
+        )
+        assert response.status == 409
         assert (
             await client.post(
                 undo,
@@ -277,7 +304,7 @@ def test_nickname_merge_can_link_to_one_live_account_and_rejects_two(raffle):
                     "title": "奖品",
                     "organizer": "群友",
                     "deadline": "",
-                    "entrants": ["以前的昵称", "另一个人"],
+                    "entrants": ["以前的昵称", "另一个人", "987654321"],
                     "winners": ["以前的昵称"],
                 }
             ]
@@ -286,6 +313,11 @@ def test_nickname_merge_can_link_to_one_live_account_and_rejects_two(raffle):
     active = store.create(ADMIN, "新抽奖", 1, NOW + 600, NOW)
     store.join(Actor(GROUP, "61001", "现在的昵称"), active, NOW)
     store.join(Actor(GROUP, "61002", "另一个人"), active, NOW)
+    choices = nickname_admin_data(store, GROUP)
+    assert "987654321" not in json.dumps(choices, ensure_ascii=False)
+    assert "•••" in [option["label"] for option in choices["old_options"]]
+    assert "现在的昵称" not in [option["label"] for option in choices["old_options"]]
+    assert "现在的昵称" in [option["label"] for option in choices["target_options"]]
     merge_nickname(store, GROUP, "以前的昵称", "现在的昵称")
     _, _, result = group_summary(store, GROUP, NOW, page=1, rank_query="以前的昵称")
     assert result["matches"] == [{"name": "现在的昵称", "entered": 2, "awarded": 1}]

@@ -6,6 +6,7 @@ import unicodedata
 from collections import Counter, defaultdict
 
 from .store import PAGE_SIZE, RaffleError, display_time
+from .web_auth import WebAuth
 from .web_records import status_of
 
 RANK_LIMIT = 10
@@ -169,23 +170,86 @@ def stored_merges(db, group):
     ).fetchall()
 
 
-def nickname_merges(store, group):
+def nickname_admin_data(store, group):
     with store.transaction() as db:
-        return [
+        merges = stored_merges(db, group)
+        live, archive = summary_records(db, group)
+    archived, known = nickname_names(live, archive)
+    used = {row["old_key"] for row in merges}
+    tokens = nickname_tokens(store, group, known)
+    counts = Counter(public_name(name) for name, _ in known.values())
+
+    def option(key):
+        name, location = known[key]
+        label = public_name(name)
+        if counts[label] > 1:
+            label = f"{label}（{location}）"
+        return {"id": tokens[key], "label": label}
+
+    return {
+        "rules": [
             {
                 "id": row["id"],
                 "old": public_name(row["old_name"]),
                 "target": public_name(row["target_name"]),
             }
-            for row in stored_merges(db, group)
-        ]
+            for row in merges
+        ],
+        "old_options": [option(key) for key in sorted(archived.keys() - used)],
+        "target_options": [option(key) for key in sorted(known)],
+    }
 
 
-def merge_nickname(store, group, old, target):
-    old_key, target_key = name_key(old), name_key(target)
-    if not old_key or not target_key or old_key == target_key:
-        raise RaffleError("请输入两个不同的昵称。")
+def nickname_names(live, archive):
+    archived = {}
+    for record in archive:
+        names = json.loads(record["entrants"]) + json.loads(record["winners"])
+        for position, name in enumerate(names, 1):
+            key = name_key(name)
+            if key:
+                archived.setdefault(
+                    key,
+                    (
+                        name,
+                        f"{record['source']} 第 {record['source_row']} 行第 {position} 项",
+                    ),
+                )
+    known = dict(archived)
+    for record in live:
+        for position, person in enumerate(json.loads(record["entrants"]), 1):
+            key = name_key(person["name"])
+            if key and key != "群友":
+                known.setdefault(
+                    key, (person["name"], f"抽奖 #{record['id']} 第 {position} 项")
+                )
+    return archived, known
+
+
+def nickname_tokens(store, group, names):
+    auth = WebAuth(store)
+    return {
+        key: auth.sign("nickname-choice", json.dumps([group, key]))[:32]
+        for key in names
+    }
+
+
+def merge_nickname(store, group, old, target, *, selected=False):
     with store.transaction(write=True) as db:
+        live, archive = summary_records(db, group)
+        archived, known = nickname_names(live, archive)
+        if selected:
+            choices = {
+                token: key
+                for key, token in nickname_tokens(store, group, known).items()
+            }
+            old_key, target_key = choices.get(old), choices.get(target)
+            if old_key is None or target_key is None:
+                raise RaffleError("下拉选项已更新，请重新选择昵称。")
+        else:
+            old_key, target_key = name_key(old), name_key(target)
+        if not old_key or not target_key or old_key == target_key:
+            raise RaffleError("请选择两个不同的昵称。")
+
         links = {row["old_key"]: row["target_key"] for row in stored_merges(db, group)}
         if links.get(old_key) == target_key:
             return
@@ -193,35 +257,19 @@ def merge_nickname(store, group, old, target):
             raise RaffleError("这个旧昵称已有合并，请先撤销原合并。")
         if nickname_root(links, target_key) == old_key:
             raise RaffleError("这两个昵称已经指向同一条合并链。")
-        live, archive = summary_records(db, group)
-        archived = {}
-        for record in archive:
-            for name in json.loads(record["entrants"]) + json.loads(record["winners"]):
-                archived.setdefault(name_key(name), name)
         if old_key not in archived:
             raise RaffleError("在旧表的参与或中奖记录中找不到这个旧昵称。")
-        live_people = [(json.loads(row["entrants"]), ()) for row in live]
-        target_name = archived.get(target_key)
-        if target_name is None:
-            target_name = next(
-                (
-                    person["name"]
-                    for entrants, _ in live_people
-                    for person in entrants
-                    if name_key(person["name"]) == target_key and target_key != "群友"
-                ),
-                None,
-            )
-        if target_name is None:
-            raise RaffleError("找不到目标昵称，请填写旧表或机器人记录里的完整昵称。")
+        if target_key not in known:
+            raise RaffleError("找不到归入昵称，请从候选列表重新选择。")
         links[old_key] = target_key
         root = nickname_root(links, target_key)
+        live_people = [(json.loads(row["entrants"]), ()) for row in live]
         if len(live_aliases(live_people, links).get(root, ())) > 1:
             raise RaffleError("这些昵称对应多个 QQ 账号，无法合并。")
         db.execute(
             """INSERT INTO raffle_nickname_merges
                (scope, old_key, old_name, target_key, target_name) VALUES (?, ?, ?, ?, ?)""",
-            (group, old_key, archived[old_key], target_key, target_name),
+            (group, old_key, archived[old_key][0], target_key, known[target_key][0]),
         )
 
 

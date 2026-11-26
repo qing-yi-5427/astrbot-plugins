@@ -384,7 +384,12 @@ class Store:
     def pending_notices(self):
         with self.transaction() as db:
             return db.execute(
-                """SELECT r.*, n.kind, n.due FROM web_notices n JOIN raffles r ON r.id=n.raffle
+                """SELECT r.*, n.kind, n.due,
+                   CASE WHEN n.kind='网页开奖' THEN (
+                     SELECT l.qq FROM ledger l
+                     WHERE l.raffle=r.id AND l.kind='开奖' ORDER BY l.id DESC LIMIT 1
+                   ) END AS drawer
+                   FROM web_notices n JOIN raffles r ON r.id=n.raffle
                    WHERE n.status='pending' ORDER BY n.due,n.raffle"""
             ).fetchall()
 
@@ -421,6 +426,24 @@ class Store:
                 """SELECT r.*, (SELECT count(*) FROM entrants WHERE raffle=r.id) AS people
                 FROM raffles r WHERE scope=? AND status IN (?,?) ORDER BY id DESC LIMIT ? OFFSET ?""",
                 (group, *statuses, PAGE_SIZE + 1, PAGE_SIZE * (page - 1)),
+            ).fetchall()
+
+    def open_for_join(self, scope, now):
+        with self.transaction() as db:
+            return db.execute(
+                """SELECT id,title FROM raffles WHERE scope=? AND status='open'
+                   AND deadline>? ORDER BY id DESC""",
+                (scope, now),
+            ).fetchall()
+
+    def owned_pending(self, who):
+        with self.transaction() as db:
+            return db.execute(
+                """SELECT r.id,r.title,r.deadline,
+                   (SELECT count(*) FROM entrants WHERE raffle=r.id) AS people
+                   FROM raffles r WHERE r.scope=? AND r.owner=?
+                   AND r.status IN ('open','closed') ORDER BY r.id DESC""",
+                (who.group, who.qq),
             ).fetchall()
 
     def details(self, group, number, page):

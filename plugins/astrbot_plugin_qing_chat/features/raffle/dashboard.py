@@ -282,12 +282,13 @@ def operation_error(message, path):
 
 
 class Dashboard:
-    def __init__(self, store, origin, resolve_actor, sync_status):
+    def __init__(self, store, origin, resolve_actor, sync_status, require_document):
         self.store = store
         self.auth = WebAuth(store)
         self.origin = origin
         self.resolve_actor = resolve_actor
         self.sync_status = sync_status
+        self.require_document = require_document
 
     @staticmethod
     def browser(request):
@@ -416,7 +417,14 @@ class Dashboard:
         actor, failure = await self.need_actor(request)
         if failure is not None:
             return failure
-        token = await asyncio.to_thread(self.store.new_form, actor, int(time.time()))
+        try:
+            if self.require_document is not None:
+                self.require_document(actor)
+            token = await asyncio.to_thread(
+                self.store.new_form, actor, int(time.time())
+            )
+        except RaffleError as exc:
+            return operation_error(str(exc), "/panel")
         raise web.HTTPSeeOther("/f/" + token, headers=HEADERS)
 
     async def draft(self, request):
@@ -450,6 +458,8 @@ class Dashboard:
         if not isinstance(code, str) or not re.fullmatch(r"[A-F0-9]{8}", code):
             raise web.HTTPBadRequest(headers=HEADERS)
         try:
+            if self.require_document is not None:
+                self.require_document(actor)
             number, *_ = await asyncio.to_thread(
                 self.store.confirm_form, actor, code, int(time.time()), web=True
             )
@@ -579,8 +589,8 @@ class Dashboard:
         )
 
 
-def add_dashboard(app, store, origin, resolve_actor, sync_status):
-    dashboard = Dashboard(store, origin, resolve_actor, sync_status)
+def add_dashboard(app, store, origin, resolve_actor, sync_status, require_document):
+    dashboard = Dashboard(store, origin, resolve_actor, sync_status, require_document)
     assets = Path(__file__).with_name("assets")
     for filename, content_type in (
         ("raffle.css", "text/css"),

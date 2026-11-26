@@ -5,9 +5,11 @@ import json
 import re
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from aiohttp import web
+from astrbot.api.event import MessageChain, filter
 from astrbot.api.star import StarTools
 
 from ...runtime import FeatureService
@@ -26,15 +28,28 @@ from .store import (
 from .web_auth import WebAuth
 
 HELP = (
-    "群抽奖（北京时间）\n"
-    "/抽奖 发起 · 打开发起表单（需启用表单地址）\n"
-    "/抽奖 发起 中奖人数 YYYY-MM-DD HH:MM 奖品描述\n"
-    "例：/抽奖 发起 2 2026-12-01 21:00 Steam 礼物\n"
-    "/抽奖 列表 [页] · /抽奖 报名 编号 · /抽奖 名单 编号 [页]\n"
-    "/抽奖 开奖 编号 · /抽奖 取消 编号\n"
-    "/抽奖 历史 [页] · /抽奖 结果 编号 [页]\n"
-    "/抽奖 管理 · 打开网页管理台\n"
-    "也可以 @机器人 后输入上述动作，例如 @机器人 报名 12。"
+    "【QQ群抽奖使用说明】\n\n"
+    "① 发起｜发 /抽奖 发起，打开链接填奖品、中奖人数和截止时间（北京时间）。"
+    "表单 15 分钟内有效。填好后把页面上的 /抽奖 确认 指令发回原群，"
+    "或登录网页管理台发布。发布后群友才能报名。\n\n"
+    "② 报名｜发 /抽奖 报名。只有一场可报名时直接加入；"
+    "有多场时机器人会列出编号和奖品，2 分钟内在原群只发对应的数字，例如 12。"
+    "直接发数字，不要引用回复或 @ 机器人。也可以发 /抽奖 报名 12。"
+    "每人每场只报一次，报名后会拿到固定序号。\n\n"
+    "③ 开奖｜截止后，发起人发 /抽奖 开奖。若有多场需要选择，"
+    "按提示发 /抽奖 开奖 编号。机器人从报名序号里随机抽取，"
+    "公布抽中的号码，并 @ 开奖人和获奖人。群主和群管理员也可指定编号开奖。"
+    "重复开奖只显示原结果。\n\n"
+    "④ 查询与管理\n"
+    "/抽奖 列表 [页码] · 查看报名中和待开奖的场次\n"
+    "/抽奖 名单 编号 [页码] · 查报名序号和昵称\n"
+    "/抽奖 历史 [页码] · 查已结束的场次\n"
+    "/抽奖 结果 编号 [页码] · 查原开奖结果\n"
+    "/抽奖 取消 编号 · 发起人或群管理取消\n"
+    "/抽奖 管理 · 打开网页，按提示在原群确认登录\n"
+    "/抽奖 同步状态 · 查看腾讯文档同步进度\n\n"
+    "报名截止时会 @ 发起人；离截止超过 1 小时发起的场次还有一次提前提醒。"
+    "发布后的发起、报名、开奖、取消与提醒记录在网页可查，并同步到本群绑定的腾讯文档「bot 抽奖记录」。"
 )
 ACTIONS = {
     "帮助",
@@ -51,6 +66,14 @@ ACTIONS = {
     "结果",
     "同步状态",
 }
+CHOICE_SECONDS = 120
+_join_prompts = {}
+
+
+@dataclass(frozen=True)
+class DrawReply:
+    raffle: Mapping
+    drawer: str
 
 
 def number(token):
@@ -87,6 +110,41 @@ def mention_command(event):
     if tokens[0] == "抽奖":
         return tokens[1] if len(tokens) > 1 else "帮助"
     return command if tokens[0] in ACTIONS else None
+
+
+def group_scope(event):
+    return f"{event.get_platform_id()}:GroupMessage:{event.get_group_id()}"
+
+
+def selected_raffle(event):
+    key = (group_scope(event), str(event.get_sender_id()))
+    prompt = _join_prompts.get(key)
+    if prompt is None or prompt[0] <= time.monotonic():
+        return None
+    raw = getattr(event.message_obj, "raw_message", None)
+    segments = raw.get("message") if isinstance(raw, Mapping) else None
+    if not isinstance(segments, list):
+        return None
+    text = []
+    for segment in segments:
+        if not isinstance(segment, Mapping) or segment.get("type") != "text":
+            return None
+        data = segment.get("data")
+        value = data.get("text") if isinstance(data, Mapping) else None
+        if not isinstance(value, str):
+            return None
+        text.append(value)
+    digits = "".join(text).strip()
+    if re.fullmatch(r"[1-9][0-9]{0,8}", digits) and int(digits) in prompt[1]:
+        return int(digits)
+    return None
+
+
+class RaffleFollowup(filter.CustomFilter):
+    def filter(self, event, cfg):
+        return RaffleService.in_group(event) and (
+            mention_command(event) is not None or selected_raffle(event) is not None
+        )
 
 
 class RaffleService(FeatureService):
@@ -138,6 +196,7 @@ class RaffleService(FeatureService):
                 origin,
                 resolve_actor=self.web_actor,
                 sync_status=self.web_sync_status,
+                require_document=self.require_document,
             )
             runner = web.AppRunner(app, access_log=None)
             await runner.setup()
@@ -201,6 +260,7 @@ class RaffleService(FeatureService):
 
     async def terminate(self):
         self.form_url = ""
+        _join_prompts.clear()
         if self.form_runner is not None:
             await self.form_runner.cleanup()
             self.form_runner = None
@@ -213,12 +273,30 @@ class RaffleService(FeatureService):
     def in_group(event):
         return event.get_platform_name() == "aiocqhttp" and bool(event.get_group_id())
 
+    def require_document(self, actor):
+        group = actor.group.rsplit(":", 1)[-1]
+        if (
+            self.config.get("require_document", False)
+            and group not in self.document_bindings
+        ):
+            raise RaffleError("本群还未绑定腾讯文档，请先联系管理员设置抽奖记录文档。")
+
+    async def handle_followup(self, event):
+        choice = selected_raffle(event)
+        if choice is not None:
+            _join_prompts.pop((group_scope(event), str(event.get_sender_id())), None)
+            await self.handle(event, f"报名 {choice}")
+            return
+        command = mention_command(event)
+        if command is not None:
+            await self.handle(event, command)
+
     async def handle(self, event, command):
         if not self.in_group(event) or str(event.get_sender_id()) == str(
             event.get_self_id()
         ):
             return
-        group = f"{event.get_platform_id()}:GroupMessage:{event.get_group_id()}"
+        group = group_scope(event)
         raw = getattr(event.message_obj, "raw_message", None)
         sender = raw.get("sender") if isinstance(raw, Mapping) else None
         moderator = isinstance(sender, Mapping) and sender.get("role") in {
@@ -234,21 +312,35 @@ class RaffleService(FeatureService):
         )
         event.should_call_llm(False)
         try:
-            reply = await self.execute(actor, command)
+            reply = await self.execute(actor, command, with_mentions=True)
         except RaffleError as exc:
             reply = str(exc)
         except Exception as exc:
             self.logger.error("群抽奖记录操作异常 (%s)", type(exc).__name__)
             reply = "抽奖记录处理异常，请稍后查询状态。"
-        event.stop_event()
-        return event.plain_result(reply).use_t2i(False)
+        messages = (
+            self.draw_messages(reply.raffle, reply.drawer)
+            if isinstance(reply, DrawReply)
+            else (MessageChain(use_t2i_=False, use_markdown_=False).message(reply),)
+        )
+        try:
+            for message in messages:
+                try:
+                    async with asyncio.timeout(12):
+                        await event.send(message)
+                except Exception as exc:
+                    self.logger.warning(
+                        "抽奖消息发送状态未确认 (%s)", type(exc).__name__
+                    )
+        finally:
+            event.stop_event()
 
-    async def execute(self, actor, command):
+    async def execute(self, actor, command, *, with_mentions=False):
         parts = (command.strip() or "帮助").split(maxsplit=4)
         action, *args = parts
         now = int(time.time())
         if action == "帮助" or action not in ACTIONS:
-            return HELP
+            return self.help()
         if action == "管理" and not args:
             return (
                 f"本群抽奖管理台：{self.form_url}\n打开后选择「通过 QQ 群登录」。"
@@ -261,11 +353,12 @@ class RaffleService(FeatureService):
                 "已验证本群身份，请返回生成指令的网页，点击「我已发送，进入管理台」。"
             )
         if action == "发起":
+            self.require_document(actor)
             if not args and self.form_url:
                 token = await asyncio.to_thread(self.store.new_form, actor, now)
                 return f"打开表单填写奖品、人数和截止时间（链接 15 分钟有效）：\n{self.form_url}/f/{token}\n填完后复制确认指令，回本群发布。"
             if len(args) != 4:
-                return HELP
+                return self.help()
             title, slots, deadline = validate_details(
                 args[3], number(args[0]), f"{args[1]} {args[2]}", now
             )
@@ -274,6 +367,7 @@ class RaffleService(FeatureService):
             )
             return self.created_reply(raffle, title, slots, deadline, now)
         if action == "确认" and len(args) == 1:
+            self.require_document(actor)
             code = args[0].upper()
             if not re.fullmatch(r"[A-F0-9]{8}", code):
                 raise RaffleError("请复制表单上的确认指令。")
@@ -322,23 +416,78 @@ class RaffleService(FeatureService):
             if not people:
                 lines.append("这一页没有报名记录。")
             return self.paginate(lines, people, f"/抽奖 名单 {raffle_id}", page)
+        if action == "报名" and not args:
+            return await self.join_prompt(actor, now)
+        if action == "开奖" and not args:
+            return await self.choose_draw(actor, now, with_mentions)
         if action in ("报名", "开奖", "取消") and len(args) == 1:
             raffle_id = number(args[0])
             if action == "报名":
-                slot, created = await asyncio.to_thread(
-                    self.store.join, actor, raffle_id, now
-                )
-                state = "报名成功" if created else "你已报名"
-                return f"{state}。抽奖 #{raffle_id}，你的报名序号是 {slot}。"
-            fresh, raffle, _ = await asyncio.to_thread(
-                self.store.close, actor, raffle_id, now, cancel=action == "取消"
-            )
+                return await self.join(actor, raffle_id, now)
             if action == "取消":
+                await asyncio.to_thread(
+                    self.store.close, actor, raffle_id, now, cancel=True
+                )
                 return f"抽奖 #{raffle_id} 已取消。"
-            return ("" if fresh else "这场已经开过奖，以下是原结果。\n") + self.result(
-                raffle, 1
-            )
-        return HELP
+            return await self.draw(actor, raffle_id, now, with_mentions)
+        return self.help()
+
+    def help(self):
+        return f"{HELP}\n\n网页管理台：{self.form_url}" if self.form_url else HELP
+
+    async def join(self, actor, raffle_id, now):
+        slot, created = await asyncio.to_thread(self.store.join, actor, raffle_id, now)
+        _join_prompts.pop((actor.group, actor.qq), None)
+        state = "报名成功" if created else "你已报名"
+        return f"{state}。抽奖 #{raffle_id}，你的报名序号是 {slot}。"
+
+    async def join_prompt(self, actor, now):
+        rows = await asyncio.to_thread(self.store.open_for_join, actor.group, now)
+        key = (actor.group, actor.qq)
+        _join_prompts.pop(key, None)
+        if not rows:
+            return "本群当前没有可报名的抽奖。"
+        if len(rows) == 1:
+            return await self.join(actor, rows[0]["id"], now)
+        moment = time.monotonic()
+        for identity, (until, _) in tuple(_join_prompts.items()):
+            if until <= moment:
+                _join_prompts.pop(identity, None)
+        _join_prompts[key] = (moment + CHOICE_SECONDS, {row["id"] for row in rows})
+        lines = ["本群有多场抽奖正在报名："]
+        lines.extend(f"{r['id']} · {r['title'][:48]}" for r in rows[:PAGE_SIZE])
+        if len(rows) > PAGE_SIZE:
+            lines.append(f"共 {len(rows)} 场，其余用 /抽奖 列表 2 或在管理台查看。")
+        lines.append(
+            "请在 2 分钟内直接发对应数字，不要回复或 @ 机器人。也可以发 /抽奖 报名 编号。"
+        )
+        return "\n".join(lines)
+
+    async def choose_draw(self, actor, now, with_mentions):
+        rows = await asyncio.to_thread(self.store.owned_pending, actor)
+        if not rows:
+            return "你在本群没有待开奖的场次。可用 /抽奖 历史 查看已结束场次。群管理可以发 /抽奖 开奖 编号。"
+        ready = [row for row in rows if row["deadline"] <= now and row["people"]]
+        candidates = ready or rows
+        if len(candidates) == 1:
+            return await self.draw(actor, candidates[0]["id"], now, with_mentions)
+        lines = ["你发起了多场抽奖，请发 /抽奖 开奖 编号 选择一场："]
+        lines.extend(
+            f"#{r['id']} · {r['title'][:48]} · {r['people']} 人 · {display_time(r['deadline'])} 截止"
+            for r in candidates[:PAGE_SIZE]
+        )
+        if len(candidates) > PAGE_SIZE:
+            lines.append("其余场次可以用 /抽奖 列表 或在管理台查看。")
+        return "\n".join(lines)
+
+    async def draw(self, actor, raffle_id, now, with_mentions):
+        fresh, raffle, _ = await asyncio.to_thread(
+            self.store.close, actor, raffle_id, now
+        )
+        if fresh and with_mentions:
+            return DrawReply(dict(raffle), actor.qq)
+        prefix = "" if fresh else "这场已经开过奖，以下是原结果。\n"
+        return prefix + self.result(raffle, 1)
 
     @staticmethod
     def created_reply(raffle, title, slots, deadline, now):
@@ -347,7 +496,7 @@ class RaffleService(FeatureService):
             if deadline - now > 3600
             else "距截止不超过一小时，截止时会提醒发起人。"
         )
-        return f"抽奖 #{raffle} 已发起｜{title}\n抽 {slots} 人，{display_time(deadline)} 截止（北京时间）。\n报名：/抽奖 报名 {raffle}\n{reminder}"
+        return f"抽奖 #{raffle} 已发起｜{title}\n抽 {slots} 人，{display_time(deadline)} 截止（北京时间）。\n报名：/抽奖 报名 或 /抽奖 报名 {raffle}\n{reminder}"
 
     @staticmethod
     def paginate(lines, records, command, page):
@@ -372,6 +521,24 @@ class RaffleService(FeatureService):
         if not rows:
             lines.append("这一页没有中奖记录。")
         return self.paginate(lines, rows, f"/抽奖 结果 {raffle['id']}", page)
+
+    def draw_messages(self, raffle, drawer):
+        winners = json.loads(raffle["winners"])
+        for start in range(0, len(winners), PAGE_SIZE):
+            message = MessageChain(use_t2i_=False, use_markdown_=False)
+            if start == 0 and drawer:
+                message.message("开奖人 ").at("", drawer).message("\n")
+            message.message(self.result(raffle, start // PAGE_SIZE + 1))
+            mentions = [
+                winner
+                for winner in winners[start : start + PAGE_SIZE]
+                if start or winner["qq"] != drawer
+            ]
+            if mentions:
+                message.message("\n获奖通知 ")
+                for winner in mentions:
+                    message.at(winner["name"], winner["qq"]).message(" ")
+            yield message
 
     async def reminder_loop(self):
         while True:
@@ -409,11 +576,19 @@ class RaffleService(FeatureService):
         number = raffle["id"]
         now = int(time.time())
         if raffle["kind"] == "网页开奖":
-            text = self.result(raffle, 1)
+            messages = self.draw_messages(raffle, raffle["drawer"])
         elif raffle["kind"] == "网页取消":
-            text = f"抽奖 #{number}「{raffle['title']}」已从网页管理台取消。"
+            messages = (
+                MessageChain().message(
+                    f"抽奖 #{number}「{raffle['title']}」已从网页管理台取消。"
+                ),
+            )
         elif now >= raffle["deadline"]:
-            text = f"网页发起的抽奖 #{number}「{raffle['title']}」报名已截止。"
+            messages = (
+                MessageChain().message(
+                    f"网页发起的抽奖 #{number}「{raffle['title']}」报名已截止。"
+                ),
+            )
         else:
             text = self.created_reply(
                 number,
@@ -422,20 +597,28 @@ class RaffleService(FeatureService):
                 raffle["deadline"],
                 raffle["due"],
             )
+            messages = (MessageChain().message(text),)
         group = int(raffle["scope"].rsplit(":", 1)[-1])
         confirmed = False
         try:
-            async with asyncio.timeout(12):
-                response = await platform.bot.call_action(
-                    "send_group_msg",
-                    group_id=group,
-                    message=[{"type": "text", "data": {"text": text}}],
-                )
-            confirmed = (
-                isinstance(response, dict) and response.get("message_id") is not None
-            )
-        except Exception:
-            self.logger.warning("抽奖 #%s 网页公告发送状态未确认", number)
+            all_confirmed = True
+            for message in messages:
+                try:
+                    async with asyncio.timeout(12):
+                        response = await platform.bot.call_action(
+                            "send_group_msg",
+                            group_id=group,
+                            message=[part.toDict() for part in message.chain],
+                        )
+                    all_confirmed &= (
+                        isinstance(response, dict)
+                        and response.get("message_id") is not None
+                    )
+                except Exception:
+                    all_confirmed = False
+            confirmed = all_confirmed
+            if not confirmed:
+                self.logger.warning("抽奖 #%s 网页公告发送状态未确认", number)
         finally:
             await asyncio.to_thread(
                 self.store.finish_notice, raffle, int(time.time()), confirmed

@@ -105,7 +105,9 @@ def saved(row):
     )
 
 
-def create_app(store, origin, *, resolve_actor=None, sync_status=None):
+def create_app(
+    store, origin, *, resolve_actor=None, sync_status=None, require_document=None
+):
     async def form(request):
         token = request.match_info["token"]
         now = int(time.time())
@@ -151,7 +153,7 @@ def create_app(store, origin, *, resolve_actor=None, sync_status=None):
     if resolve_actor is None:
         app.router.add_get("/", landing)
     else:
-        add_dashboard(app, store, origin, resolve_actor, sync_status)
+        add_dashboard(app, store, origin, resolve_actor, sync_status, require_document)
     app.router.add_get(r"/f/{token:[A-Za-z0-9_-]{43}}", form, allow_head=False)
     app.router.add_post(r"/f/{token:[A-Za-z0-9_-]{43}}", form)
     return app

@@ -329,3 +329,135 @@ def test_form_expires_and_new_link_replaces_old_draft(storage):
     new = storage.new_form(OWNER, NOW + 5)
     assert storage.form(first, NOW + 5) is None
     assert storage.form(new, NOW + 5) is not None
+
+
+def group_event(qq, text, *, group="123", quoted=False):
+    from unittest.mock import Mock
+
+    segments = [{"type": "text", "data": {"text": text}}]
+    if quoted:
+        segments.insert(0, {"type": "reply", "data": {"id": "555"}})
+    return SimpleNamespace(
+        message_obj=SimpleNamespace(raw_message={"message": segments}),
+        get_platform_id=lambda: "default",
+        get_platform_name=lambda: "aiocqhttp",
+        get_group_id=lambda: group,
+        get_self_id=lambda: "9999",
+        get_sender_id=lambda: qq,
+        get_sender_name=lambda: "群友",
+        should_call_llm=Mock(),
+        stop_event=Mock(),
+        send=AsyncMock(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_short_join_and_bare_number_stay_in_own_group(storage, monkeypatch):
+    from astrbot_plugin_qing_chat.features.raffle import main
+
+    monkeypatch.setattr(main, "_join_prompts", {})
+    monkeypatch.setattr(main.time, "time", lambda: NOW)
+    service = RaffleService(None, {})
+    service.store = storage
+    assert "没有可报名" in await service.execute(GUEST, "报名")
+    expired = storage.create(OWNER, "已过截止", 1, NOW, NOW - 60)
+    first = storage.create(OWNER, "礼物甲", 1, NOW + 60, NOW)
+    assert f"#{first}" in await service.execute(GUEST, "报名")
+    assert "你已报名" in await service.execute(GUEST, "报名")
+    second = storage.create(OWNER, "礼物乙", 1, NOW + 120, NOW)
+    prompt = await service.execute(GUEST, "报名")
+    assert f"{first} · 礼物甲" in prompt and f"{second} · 礼物乙" in prompt
+    assert "已过截止" not in prompt and "不要回复或 @ 机器人" in prompt
+    listener = main.RaffleFollowup()
+    invalid_events = (
+        group_event(GUEST.qq, str(expired)),
+        group_event(GUEST.qq, str(second), quoted=True),
+        group_event(OWNER.qq, str(second)),
+        group_event(GUEST.qq, str(second), group="456"),
+    )
+    for event in invalid_events:
+        assert not listener.filter(event, {})
+        await service.handle_followup(event)
+        event.send.assert_not_awaited()
+        event.stop_event.assert_not_called()
+
+    event = group_event(GUEST.qq, str(second))
+    assert listener.filter(event, {})
+    await service.handle_followup(event)
+    assert f"#{second}" in event.send.await_args.args[0].get_plain_text()
+    event.stop_event.assert_called_once()
+    assert not listener.filter(event, {})
+
+    await service.execute(GUEST, "报名")
+    with monkeypatch.context() as patch:
+        patch.setattr(main, "time", SimpleNamespace(monotonic=lambda: 1e20))
+        assert not listener.filter(event, {})
+
+
+@pytest.mark.asyncio
+async def test_short_draw_mentions_drawer_and_all_winners_once(storage, monkeypatch):
+    import time
+
+    monkeypatch.setattr(time, "time", lambda: NOW)
+    service = RaffleService(None, {})
+    service.store = storage
+    first = storage.create(OWNER, "礼物", 25, NOW, NOW - 120)
+    storage.create(OWNER, "明天的礼物", 1, NOW + 7200, NOW)
+    for user in range(1101, 1126):
+        storage.join(Actor(OWNER.group, str(user), f"群友 {user}"), first, NOW - 60)
+    event = group_event(OWNER.qq, "/抽奖 开奖")
+
+    async def send_before_stop(_message):
+        event.stop_event.assert_not_called()
+
+    event.send.side_effect = send_before_stop
+    await service.handle(event, "开奖")
+    assert event.send.await_count == 2
+    messages = [call.args[0] for call in event.send.await_args_list]
+    assert "共 25 人报名" in messages[0].get_plain_text()
+    assert "随机抽中" in messages[1].get_plain_text()
+    mentions = {
+        str(part.qq)
+        for message in messages
+        for part in message.chain
+        if hasattr(part, "qq")
+    }
+    assert mentions == {OWNER.qq, *(str(user) for user in range(1101, 1126))}
+    event.stop_event.assert_called_once()
+    event.should_call_llm.assert_called_once_with(False)
+    again = group_event(OWNER.qq, f"/抽奖 开奖 {first}")
+    await service.handle(again, f"开奖 {first}")
+    assert "已经开过奖" in again.send.await_args.args[0].get_plain_text()
+    assert not any(hasattr(p, "qq") for p in again.send.await_args.args[0].chain)
+    assert [row["kind"] for row in storage.unsynced(0)].count("开奖") == 1
+
+
+@pytest.mark.asyncio
+async def test_help_and_new_raffle_binding(storage):
+    service = RaffleService(None, {"require_document": True})
+    service.store = storage
+    service.form_url = "https://raffle.example.test"
+    event = group_event(OWNER.qq, "/抽奖 帮助")
+    await service.handle(event, "帮助")
+    text = event.send.await_args.args[0].get_plain_text()
+    assert all(
+        item in text
+        for item in (
+            "发起",
+            "确认",
+            "报名",
+            "开奖",
+            "名单",
+            "管理",
+            "历史",
+            "取消",
+            "不要引用回复",
+            "腾讯文档",
+            service.form_url,
+        )
+    )
+    with pytest.raises(RaffleError, match="未绑定"):
+        await service.execute(OWNER, "发起")
+    assert not storage.unsynced(0)
+    service.document_bindings["123"] = "file-test"
+    assert f"{service.form_url}/f/" in await service.execute(OWNER, "发起")

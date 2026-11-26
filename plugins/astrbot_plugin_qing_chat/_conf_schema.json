@@ -226,6 +226,12 @@
         "default": "tencent-docs-sheet",
         "hint": "在 AstrBot 的 MCP 管理中启用该服务。插件复用这条连接，授权在 MCP 服务中配置。"
       },
+      "require_document": {
+        "description": "仅允许已绑定腾讯文档的群发起抽奖",
+        "type": "bool",
+        "default": false,
+        "hint": "启用后，QQ群和网页都要求群已绑定文档。云端暂时掉线时继续本地记录，恢复后自动补同步。"
+      },
       "form_url": {
         "description": "抽奖管理台与手机表单地址",
         "type": "string",

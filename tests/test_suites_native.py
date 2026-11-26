@@ -473,27 +473,27 @@ async def test_qq_raffle_command_and_mention_use_same_store():
     assert event.get_extra("parsed_params") == {"command": command}
     try:
         await suite.initialize()
-        replies = [
-            reply
-            async for reply in suite.raffle_command(
-                event, **event.get_extra("parsed_params")
-            )
-        ]
-        assert "抽奖 #1 已发起" in replies[0].get_plain_text() and event.is_stopped()
+        event.send = AsyncMock()
+        await suite.raffle_command(event, **event.get_extra("parsed_params"))
+        event.send.assert_awaited_once()
+        assert "抽奖 #1 已发起" in event.send.await_args.args[0].get_plain_text()
+        assert event.is_stopped()
         raw = [
             {"type": "at", "data": {"qq": "456"}},
             {"type": "text", "data": {"text": "报名 1"}},
         ]
         event = qq_event("报名 1", [At(qq="456"), Plain("报名 1")], raw)
-        replies = [reply async for reply in suite.raffle_mention(event)]
-        assert replies[0].get_plain_text() == "报名成功。抽奖 #1，你的报名序号是 1。"
+        event.send = AsyncMock()
+        await suite.raffle_mention(event)
+        assert event.send.await_args.args[0].get_plain_text() == "报名成功。抽奖 #1，你的报名序号是 1。"
         assert event.is_stopped()
         normal = qq_event(
             "你好",
             [At(qq="456"), Plain("你好")],
             [raw[0], {"type": "text", "data": {"text": "你好"}}],
         )
-        assert [reply async for reply in suite.raffle_mention(normal)] == []
+        await suite.raffle_mention(normal)
+        normal.send.assert_not_awaited()
         assert not normal.is_stopped()
     finally:
         await suite.terminate()

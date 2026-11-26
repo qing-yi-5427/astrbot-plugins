@@ -13,7 +13,7 @@ from .features.conversation.main import TavilyResultLimiter as ConversationServi
 from .features.context_images.main import ContextImageLimiter as ContextImagesService
 from .features.memory_compat.main import MemoryRecallFix as MemoryCompatService
 from .features.roll.main import RollPlugin as RollService
-from .features.raffle.main import RaffleService, mention_command
+from .features.raffle.main import RaffleFollowup, RaffleService
 
 LEGACY = {
     "mention": "astrbot_plugin_mention_llm",
@@ -34,7 +34,7 @@ LEGACY_IDS = {
 TOOL_NAME = "astrbot_generate_image"
 
 
-@register("astrbot_plugin_qing_chat", "qingyi", "对话管理", "1.3.0")
+@register("astrbot_plugin_qing_chat", "qingyi", "对话管理", "1.4.0")
 class Main(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context, config)
@@ -71,22 +71,17 @@ class Main(Star):
         if RaffleService.in_group(event) and await self.modules.allowed(
             "raffle", event
         ):
-            result = await self.modules.call("raffle", "handle", event, command)
-            if result is not None:
-                yield result
+            await self.modules.call("raffle", "handle", event, command)
 
     @safe_filter(
-        filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=100),
+        filter.custom_filter(RaffleFollowup, priority=100),
         LEGACY.values(),
     )
     async def raffle_mention(self, event: AstrMessageEvent):
         if not RaffleService.in_group(event):
             return
-        command = mention_command(event)
-        if command is not None and await self.modules.allowed("raffle", event):
-            result = await self.modules.call("raffle", "handle", event, command)
-            if result is not None:
-                yield result
+        if await self.modules.allowed("raffle", event):
+            await self.modules.call("raffle", "handle_followup", event)
 
     @safe_filter(filter.on_waiting_llm_request(), LEGACY.values())
     async def mention_mark_explicit_mention(self, event: AstrMessageEvent):

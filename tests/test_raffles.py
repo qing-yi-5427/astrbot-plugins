@@ -3,12 +3,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from astrbot_plugin_qing_chat.features.raffle.cloud import (
+    HEADERS,
+    LEGACY_HEADERS,
+    SHEET_NAME,
     AstrBotSheetTools,
     CloudLedger,
     MCPUnavailable,
-    SHEET_NAME,
     group_documents,
 )
 from astrbot_plugin_qing_chat.features.raffle.main import RaffleService, mention_command
@@ -134,64 +135,121 @@ async def test_native_mcp_client_is_reused_and_sheet_creation_is_not_retried():
         await call("get_sheet_info", {})
 
 
+class MockRollSheet:
+    def __init__(self):
+        self.sheets = [
+            {"sheet_id": "original", "sheet_name": "旧标签页", "row_count": 100}
+        ]
+        self.cells = {}
+        self.lose_row = False
+        self.lose_clear = False
+
+    def add(self):
+        self.sheets.append(
+            {
+                "sheet_id": "separate",
+                "sheet_name": SHEET_NAME,
+                "row_count": 100,
+                "col_count": 26,
+            }
+        )
+
+    async def __call__(self, name, arguments):
+        assert arguments["file_id"] == "fake"
+        if name == "get_sheet_info":
+            return {"sheets": self.sheets}
+        if name == "add_sheet":
+            self.add()
+            return {"sheet_id": "separate"}
+        assert arguments["sheet_id"] == "separate"
+        if name == "get_cell_data":
+            return {
+                "cells": [
+                    cell
+                    for (row, col), cell in self.cells.items()
+                    if arguments["start_row"] <= row <= arguments["end_row"]
+                    and arguments["start_col"] <= col <= arguments["end_col"]
+                ]
+            }
+        if name == "set_range_value":
+            for cell in arguments["values"]:
+                self.cells[cell["row"], cell["col"]] = cell
+            if arguments["values"][0]["row"] > 0 and self.lose_row:
+                self.lose_row = False
+                raise TimeoutError("write succeeded but response was lost")
+        if name == "clear_range_cells":
+            for row, col in tuple(self.cells):
+                if (
+                    arguments["start_row"] <= row <= arguments["end_row"]
+                    and arguments["start_col"] <= col <= arguments["end_col"]
+                ):
+                    del self.cells[row, col]
+            if self.lose_clear:
+                self.lose_clear = False
+                raise TimeoutError("clear succeeded but response was lost")
+        return {}
+
+
 @pytest.mark.asyncio
 async def test_cloud_replicates_after_uncertain_write_using_same_rows(storage):
     raffle = storage.create(OWNER, "=literal text", 1, NOW + 7200, NOW)
     outsider = Actor("default:GroupMessage:456", "5001", "其他群")
     storage.create(outsider, "其他群的数据", 1, NOW + 7200, NOW)
     storage.join(GUEST, raffle, NOW)
-    sheets = [{"sheet_id": "original", "sheet_name": "旧标签页", "row_count": 100}]
-    cells = {}
-    lost = False
-
-    async def call(name, arguments):
-        nonlocal lost
-        assert arguments["file_id"] == "fake"
-        if name == "get_sheet_info":
-            return {"sheets": sheets}
-        if name == "add_sheet":
-            sheets.append(
-                {
-                    "sheet_id": "separate",
-                    "sheet_name": arguments["name"],
-                    "row_count": 100,
-                }
-            )
-            return {"sheet_id": "separate"}
-        assert arguments["sheet_id"] == "separate"
-        if name == "get_cell_data":
-            return {
-                "cells": [
-                    v
-                    for (row, col), v in cells.items()
-                    if arguments["start_row"] <= row <= arguments["end_row"]
-                    and col <= arguments["end_col"]
-                ]
-            }
-        if name == "set_range_value":
-            for cell in arguments["values"]:
-                assert cell["value_type"] == "STRING"
-                cells[cell["row"], cell["col"]] = cell
-            if arguments["values"][0]["row"] > 0 and not lost:
-                lost = True
-                raise TimeoutError("write succeeded but response was lost")
-        return {}
-
-    sync = CloudLedger(storage, "123", "fake", call)
+    backend = MockRollSheet()
+    backend.lose_row = True
+    sync = CloudLedger(storage, "123", "fake", backend)
     with pytest.raises(TimeoutError):
         await sync.sync()
-    assert await sync.sync() == 2
-    assert await sync.sync() == 0
-    assert len(sheets) == 2 and sheets[1]["sheet_name"] == SHEET_NAME
-    assert cells[1, 0]["string_value"] == "R1"
-    assert cells[2, 0]["string_value"] == "R3"
-    assert cells[2, 6]["string_value"] != GUEST.qq
-    assert "=literal text" in cells[1, 7]["string_value"]
-    assert max(row for row, _ in cells) == 2
-    storage.create(outsider, "其他群的数据2", 1, NOW + 7200, NOW)
-    storage.create(OWNER, "本群下一条", 1, NOW + 7200, NOW)
     assert await sync.sync() == 1
-    assert cells[3, 0]["string_value"] == "R5"
+    assert await sync.sync() == 0
+    cells = backend.cells
+    assert len(backend.sheets) == 2
+    assert [cells[0, col]["string_value"] for col in range(len(HEADERS))] == list(
+        HEADERS
+    )
+    assert cells[1, 0]["string_value"] == OWNER.name
+    assert cells[1, 1]["string_value"] == "=literal text"
+    assert cells[1, 3]["value_type"] == "NUMBER"
+    assert cells[1, 4]["string_value"] == GUEST.name
+    assert (1, 2) not in cells
+    storage.close(OWNER, raffle, NOW + 7200)
+    assert await sync.sync() == 1
+    assert cells[1, 2]["string_value"] == GUEST.name
+    assert max(row for row, _ in cells) == 1
+    storage.create(outsider, "其他群的数据2", 1, NOW + 7200, NOW)
+    storage.create(OWNER, "本群下一场", 1, NOW + 7200, NOW)
+    assert await sync.sync() == 1
+    assert cells[2, 1]["string_value"] == "本群下一场"
+
+
+@pytest.mark.asyncio
+async def test_roll_migration_keeps_tab_and_recovers_after_clear_timeout(storage):
+    raffle = storage.create(OWNER, "历史奖品", 1, NOW + 7200, NOW)
+    storage.join(GUEST, raffle, NOW)
+    backend = MockRollSheet()
+    backend.add()
+    sync = CloudLedger(storage, "123", "fake", backend)
+    await sync.save("sheet_id", "separate")
+    await sync.save("position", "[2, 2]")
+    legacy_rows = [(*LEGACY_HEADERS, sync.marker)]
+    legacy_rows.extend(sync.legacy_columns(row) for row in storage.unsynced(0, "123"))
+    for row, values in enumerate(legacy_rows):
+        for col, value in enumerate(values):
+            backend.cells[row, col] = sync.cell(row, col, value)
+    backend.lose_clear = True
+    with pytest.raises(TimeoutError):
+        await sync.sync()
+    assert await sync.sync() == 1
+    assert len(backend.sheets) == 2
+    assert await sync.setting("sheet_id") == "separate"
+    assert backend.cells[1, 4]["string_value"] == GUEST.name
+    assert all(
+        not sync.populated(cell)
+        for (r, c), cell in backend.cells.items()
+        if r == 0 and c >= len(HEADERS)
+    )
+    assert max(row for row, _ in backend.cells) == 1
 
 
 def test_each_group_and_each_document_only_bound_once():
@@ -275,7 +333,6 @@ async def test_form_to_qq_confirmation_is_scoped_and_one_time(storage, monkeypat
     from datetime import datetime
 
     from aiohttp.test_utils import TestClient, TestServer
-
     from astrbot_plugin_qing_chat.features.raffle import form
     from astrbot_plugin_qing_chat.features.raffle.store import ZONE
 
@@ -486,3 +543,38 @@ async def test_private_send_failure_shares_only_confirmation_link(storage, monke
     assert auth.grant(private_token, NOW)["private"] == 1
     assert auth.grant(shared_token, NOW)["private"] == 0
     assert auth.accept_private(shared_token, NOW) is None
+
+
+@pytest.mark.asyncio
+async def test_early_draw_explicit_confirmation_and_publish_message(
+    storage, monkeypatch
+):
+    from astrbot_plugin_qing_chat.features.raffle import main
+
+    moment = SimpleNamespace(time=lambda: NOW, monotonic=lambda: 15.0)
+    monkeypatch.setattr(main, "time", moment)
+    service = RaffleService(None, {})
+    service.store = storage
+    token = storage.new_form(OWNER, NOW)
+    storage.save_form(token, "提前开奖测试", 1, NOW + 7200, NOW)
+    code = storage.current_draft(OWNER, NOW)["code"]
+    publication = await service.execute(OWNER, f"确认 {code}")
+    assert "已发起｜提前开奖测试" in publication
+    assert f"发起人：{OWNER.name}" in publication and "截止：" in publication
+    with pytest.raises(RaffleError, match="找不到"):
+        await service.execute(OWNER, f"确认 {code}")
+    storage.join(GUEST, 1, NOW)
+    with pytest.raises(RaffleError, match="只有"):
+        await service.execute(GUEST, "开奖 1")
+    assert "提前开奖吗" in await service.execute(OWNER, "开奖")
+    assert "没有待确认" in await service.execute(GUEST, "确认")
+    assert storage.details(OWNER.group, 1, 1)[0]["status"] == "open"
+
+    moment.monotonic = lambda: 200.0
+    assert "没有待确认" in await service.execute(OWNER, "确认")
+    assert "提前开奖吗" in await service.execute(OWNER, "开奖")
+    assert "随机抽中 1 号" in await service.execute(OWNER, "确认")
+    assert "没有待确认" in await service.execute(OWNER, "确认")
+    assert "已经开过奖" in await service.execute(OWNER, "开奖 1")
+    assert storage.due(NOW + 7200) == []
+    assert len([row for row in storage.unsynced(0) if row["kind"] == "开奖"]) == 1

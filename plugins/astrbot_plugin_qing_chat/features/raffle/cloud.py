@@ -2,14 +2,16 @@
 
 import asyncio
 import json
+import math
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
-from .store import display_time
+from .store import ZONE, display_time
 
 SHEET_NAME = "bot 抽奖记录"
-HEADERS = (
+HEADERS = ("发起人", "内容", "获奖人", "截止时间", "参与通道（请填写群常用网名）")
+LEGACY_HEADERS = (
     "流水号",
     "时间（北京时间）",
     "群编号（脱敏）",
@@ -154,61 +156,109 @@ class CloudLedger:
             raise ValueError("Unsupported Tencent Docs cell data")
         return {(cell["row"], cell["col"]): cell for cell in cells}
 
-    async def write(self, call, sheet, rows):
-        values = [
-            {"row": row, "col": col, "value_type": "STRING", "string_value": str(value)}
-            for row, columns in rows
-            for col, value in enumerate(columns)
-        ]
-        await call(
-            "set_range_value",
-            {"file_id": self.file_id, "sheet_id": sheet, "values": values},
+    async def write(self, call, sheet, values):
+        for start in range(0, len(values), 400):
+            await call(
+                "set_range_value",
+                {
+                    "file_id": self.file_id,
+                    "sheet_id": sheet,
+                    "values": values[start : start + 400],
+                },
+            )
+
+    @staticmethod
+    def cell(row, col, value):
+        if isinstance(value, str):
+            return {
+                "row": row,
+                "col": col,
+                "value_type": "STRING",
+                "string_value": value,
+            }
+        return {"row": row, "col": col, "value_type": "NUMBER", "number_value": value}
+
+    @staticmethod
+    def matches(cell, value):
+        if isinstance(value, str):
+            return (
+                cell.get("value_type") == "STRING" and cell.get("string_value") == value
+            )
+        return cell.get("value_type") == "NUMBER" and math.isclose(
+            cell.get("number_value", -1), value, rel_tol=0, abs_tol=1e-8
         )
 
-    async def ensure_sheet(self, call, started):
+    @staticmethod
+    def populated(cell):
+        return bool(cell.get("string_value")) or cell.get("value_type") not in (
+            None,
+            "",
+            "STRING",
+        )
+
+    async def ensure_sheet(self, call):
         info = await call("get_sheet_info", {"file_id": self.file_id})
         sheets = info["sheets"]
         saved = await self.setting("sheet_id")
-        if saved:
-            selected = next(
-                (item for item in sheets if item["sheet_id"] == saved), None
-            )
-            if selected is None or selected["sheet_name"] != SHEET_NAME:
-                raise MCPUnavailable(f"找不到原来的「{SHEET_NAME}」标签页")
-            return selected
         selected = next(
             (item for item in sheets if item["sheet_name"] == SHEET_NAME), None
         )
+        if saved and (selected is None or selected["sheet_id"] != saved):
+            raise MCPUnavailable(f"找不到原来的「{SHEET_NAME}」标签页")
         if selected is None:
             created = await call(
                 "add_sheet",
                 {"file_id": self.file_id, "name": SHEET_NAME, "append_index": True},
             )
-            selected = {"sheet_id": created["sheet_id"], "row_count": None}
+            selected = {"sheet_id": created["sheet_id"]}
             await self.save("created_sheet_id", selected["sheet_id"])
+            refreshed = await call("get_sheet_info", {"file_id": self.file_id})
+            selected = next(
+                item
+                for item in refreshed["sheets"]
+                if item["sheet_id"] == created["sheet_id"]
+            )
         sheet = selected["sheet_id"]
-        header = await self.read(call, sheet, 0, 0, len(HEADERS))
-        marker = header.get((0, len(HEADERS)), {}).get("string_value")
-        populated = any(
-            cell.get("string_value")
-            or cell.get("value_type") in ("FORMULA", "NUMBER", "BOOL")
-            for cell in header.values()
-        )
-        if marker != self.marker:
-            created_here = await self.setting("created_sheet_id") == sheet
-            used_rows = (selected.get("used_range") or {}).get("row_count")
+        header = await self.read(call, sheet, 0, 0, len(LEGACY_HEADERS))
+        initializing = not await self.setting("roll_ready")
+        if initializing:
             if (
-                started
-                or populated
-                or (isinstance(used_rows, int) and used_rows > 0)
-                or (used_rows is None and not created_here)
+                header.get((0, len(LEGACY_HEADERS)), {}).get("string_value")
+                == self.marker
             ):
-                raise MCPUnavailable(f"「{SHEET_NAME}」已有数据或无法确认空白")
-            await self.write(call, sheet, [(0, (*HEADERS, self.marker))])
-        await self.save("sheet_id", sheet)
+                if saved != sheet:
+                    raise MCPUnavailable("旧抽奖流水的标签页尚未绑定")
+                await self.migrate_legacy(call, selected, header)
+            elif not any(self.populated(cell) for cell in header.values()):
+                created_here = await self.setting("created_sheet_id") == sheet
+                used = (selected.get("used_range") or {}).get("row_count")
+                if not created_here and (saved or used != 0):
+                    raise MCPUnavailable(f"「{SHEET_NAME}」已有数据或无法确认空白")
+                await self.save("roll_init_sheet_id", sheet)
+                await self.write(
+                    call,
+                    sheet,
+                    [self.cell(0, col, title) for col, title in enumerate(HEADERS)],
+                )
+            elif await self.setting("roll_init_sheet_id") != sheet:
+                raise MCPUnavailable(f"「{SHEET_NAME}」已有数据或表头与抽奖格式不一致")
+            header = await self.read(call, sheet, 0, 0, len(LEGACY_HEADERS))
+        if any(
+            not self.matches(header.get((0, col), {}), title)
+            for col, title in enumerate(HEADERS)
+        ):
+            raise MCPUnavailable("腾讯文档抽奖表的表头被更改")
+        if any(
+            col >= len(HEADERS) and self.populated(cell)
+            for (_, col), cell in header.items()
+        ):
+            raise MCPUnavailable("腾讯文档抽奖表存在额外表头")
+        if initializing:
+            await self.save("sheet_id", sheet)
+            await self.save("roll_ready", "1")
         return selected
 
-    def columns(self, record):
+    def legacy_columns(self, record):
         detail = "，".join(
             f"{key} {value}" for key, value in json.loads(record["detail"]).items()
         )
@@ -225,57 +275,136 @@ class CloudLedger:
             detail,
         )
 
-    async def sync(self):
-        after, written = json.loads(await self.setting("position") or "[0, 0]")
-        records = await asyncio.to_thread(self.store.unsynced, after, self.group)
-        if not records and await self.setting("sheet_id"):
-            return 0
-        async with asyncio.timeout(55):
-            call = self.call
-            selected = await self.ensure_sheet(call, after > 0)
-            sheet = selected["sheet_id"]
-            header = await self.read(call, sheet, 0, 0, len(HEADERS))
-            if header.get((0, len(HEADERS)), {}).get("string_value") != self.marker:
-                raise RuntimeError("Managed worksheet header was changed")
-            if not records:
-                return 0
-            first, last = written + 1, written + len(records)
-            count = selected.get("row_count")
-            if isinstance(count, int) and 0 < count <= last:
+    async def migrate_legacy(self, call, selected, header):
+        sheet = selected["sheet_id"]
+        if any(
+            not self.matches(header.get((0, col), {}), title)
+            for col, title in enumerate(LEGACY_HEADERS)
+        ):
+            raise MCPUnavailable("现有流水表头被手动修改，暂停迁移")
+        after, count = json.loads(await self.setting("position") or "[0, 0]")
+        ledger = await asyncio.to_thread(
+            self.store.legacy_roll_events, self.group, after
+        )
+        if len(ledger) != count:
+            raise MCPUnavailable("现有流水同步位置与本地记录不一致，暂停迁移")
+        resuming = await self.setting("roll_init_sheet_id") == sheet
+        # Only rewrite the verified bot-owned rectangle. Other cells remain untouched.
+        for first in range(1, count + 1, 30):
+            last = min(count, first + 29)
+            existing = await self.read(call, sheet, first, last, len(LEGACY_HEADERS))
+            for row in range(first, last + 1):
+                for col, value in enumerate(self.legacy_columns(ledger[row - 1])):
+                    current = existing.get((row, col), {})
+                    if self.matches(current, value):
+                        continue
+                    if not self.populated(current) and (resuming or value == ""):
+                        continue
+                    raise MCPUnavailable("现有流水中有手动修改，暂停迁移")
+        capacity = selected.get("row_count")
+        if isinstance(capacity, int) and count + 1 < capacity:
+            next_row = await self.read(
+                call, sheet, count + 1, count + 1, len(LEGACY_HEADERS)
+            )
+            if any(self.populated(cell) for cell in next_row.values()):
+                raise MCPUnavailable("旧表中有未核对的额外记录，暂停迁移")
+        await self.save("roll_init_sheet_id", sheet)
+        # A single clear preserves the existing sheet ID. Its completion is recoverable
+        # by the saved initialization marker, even if the request loses its response.
+        if count:
+            await call(
+                "clear_range_cells",
+                {
+                    "file_id": self.file_id,
+                    "sheet_id": sheet,
+                    "start_row": 1,
+                    "end_row": count,
+                    "start_col": 0,
+                    "end_col": len(LEGACY_HEADERS) - 1,
+                },
+            )
+        await self.write(
+            call,
+            sheet,
+            [
+                self.cell(0, col, HEADERS[col] if col < len(HEADERS) else "")
+                for col in range(len(LEGACY_HEADERS) + 1)
+            ],
+        )
+
+    async def expand(self, call, sheet, selected, last_row, last_col):
+        for kind, size, last in (
+            ("row", selected.get("row_count"), last_row),
+            ("col", selected.get("col_count"), last_col),
+        ):
+            if isinstance(size, int) and 0 < size <= last:
                 await call(
                     "insert_dimension",
                     {
                         "file_id": self.file_id,
                         "sheet_id": sheet,
-                        "dimension_type": "row",
-                        "index": count - 1,
-                        "count": max(100, last + 1 - count),
+                        "dimension_type": kind,
+                        "index": size - 1,
+                        "count": max(25, last + 1 - size),
                         "direction": "after",
                     },
                 )
-            existing = await self.read(call, sheet, max(1, first - 1), last, 0)
-            if (
-                first > 1
-                and existing.get((first - 1, 0), {}).get("string_value") != f"R{after}"
-            ):
-                raise RuntimeError("Managed worksheet rows were moved or removed")
-            for row, record in enumerate(records, first):
-                cell = existing.get((row, 0), {})
-                if cell and cell.get("string_value") not in (
-                    None,
-                    "",
-                    f"R{record['id']}",
-                ):
-                    raise RuntimeError("Managed worksheet rows were moved or edited")
-                if cell.get("value_type") not in (None, "STRING"):
-                    raise RuntimeError("Managed worksheet row identifier was edited")
-            await self.write(
+
+    async def commit_row(self, call, sheet, row, columns):
+        creator, prize, winner, deadline, *entrants = columns
+        local_deadline = datetime.fromtimestamp(deadline, ZONE).replace(tzinfo=None)
+        serial = (local_deadline - datetime(1899, 12, 30)).total_seconds() / 86400
+        values = (creator, prize, winner, serial, *entrants)
+        existing = await self.read(call, sheet, row, row, len(values) - 1)
+        changes = []
+        for col, value in enumerate(values):
+            current = existing.get((row, col), {})
+            if self.matches(current, value):
+                continue
+            if self.populated(current):
+                raise MCPUnavailable("腾讯文档抽奖记录被移动或手动修改")
+            if value != "":
+                changes.append(self.cell(row, col, value))
+        if not changes:
+            return
+        if any(change["col"] == 3 for change in changes):
+            await call(
+                "set_cell_style",
+                {
+                    "file_id": self.file_id,
+                    "sheet_id": sheet,
+                    "start_row": row,
+                    "end_row": row,
+                    "start_col": 3,
+                    "end_col": 3,
+                    "number_format_pattern": "yyyy/m/d hh:mm",
+                },
+            )
+        await self.write(call, sheet, changes)
+
+    async def sync(self):
+        after, written = json.loads(await self.setting("roll_position") or "[0, 0]")
+        last_event, rows = await asyncio.to_thread(
+            self.store.roll_rows, self.group, after
+        )
+        if not rows and await self.setting("roll_ready"):
+            return 0
+        async with asyncio.timeout(55):
+            call = self.call
+            selected = await self.ensure_sheet(call)
+            if not rows:
+                return 0
+            sheet = selected["sheet_id"]
+            await self.expand(
                 call,
                 sheet,
-                [
-                    (row, self.columns(record))
-                    for row, record in enumerate(records, first)
-                ],
+                selected,
+                rows[-1][0],
+                max(len(values) for _, values in rows) - 1,
             )
-            await self.save("position", json.dumps([records[-1]["id"], last]))
-            return len(records)
+            for row, columns in rows:
+                await self.commit_row(call, sheet, row, columns)
+            await self.save(
+                "roll_position", json.dumps([last_event, max(written, rows[-1][0])])
+            )
+            return len(rows)

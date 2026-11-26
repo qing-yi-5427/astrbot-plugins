@@ -143,12 +143,13 @@ def sync_progress(store, replica):
     if replica is None:
         return 0, 0
     group, file_id = replica
-    key = f"tencent:group:{group}:{file_id}:position"
+    key = f"tencent:group:{group}:{file_id}:roll_position"
     with store.transaction() as db:
         saved = db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
         last_id, written = json.loads(saved[0]) if saved else (0, 0)
         pending = db.execute(
-            "SELECT count(*) FROM ledger WHERE scope LIKE ? AND id>?",
+            """SELECT count(DISTINCT raffle) FROM ledger WHERE scope LIKE ? AND id>?
+               AND kind IN ('发起','报名','开奖')""",
             (f"%:GroupMessage:{group}", last_id),
         ).fetchone()[0]
         return written, pending

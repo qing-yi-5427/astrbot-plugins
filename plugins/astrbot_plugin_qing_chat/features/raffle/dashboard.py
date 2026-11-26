@@ -268,7 +268,7 @@ def detail_body(
             [
                 f'<section class="surface"><div class="item-head"><h2>报名名单</h2>{links["participants"]}</div>{roster}</section>',
                 f'<section class="surface"><div class="item-head"><h2>操作流水</h2>{links["audit"]}</div>{history}</section>',
-                f'<section class="surface"><h2>QQ 提醒与公告</h2>{alerts}</section>',
+                f'<section class="surface"><h2>QQ 提醒与群消息</h2>{alerts}</section>',
             ]
         )
     pager = pagination(
@@ -437,7 +437,7 @@ class Dashboard:
         replica, sync = self.sync_status(group)
         written, pending = await asyncio.to_thread(sync_progress, self.store, replica)
         progress = (
-            f"已同步 {written} 条 · 待同步 {pending} 条" if replica else "本地保存"
+            f"已同步 {written} 场 · 待同步 {pending} 场" if replica else "本地保存"
         )
         listing = (
             f'<ul class="raffles">{"".join(list_card(row, actor) for row in rows[:PAGE_SIZE])}</ul>'
@@ -484,7 +484,7 @@ class Dashboard:
             code = escape(row["code"])
             body = f"""<p><strong>{escape(row["title"])}</strong></p>
 <p>抽 {row["slots"]} 人 · {display_time(row["deadline"])} 截止（北京时间）</p>
-<p>发布后，机器人会在原 QQ 群发出报名公告。</p>
+<p>发布后，机器人会在原 QQ 群发出报名消息。</p>
 <form method="post" action="/panel/draft">
 <input type="hidden" name="csrf" value="{self.csrf(request)}">
 <input type="hidden" name="code" value="{code}"><button>发布到 QQ 群</button></form>"""
@@ -552,7 +552,7 @@ class Dashboard:
         description = (
             "将从截止时的报名名单中抽取中奖序号，并在 QQ 群公布。"
             if operation == "draw"
-            else "将关闭报名并在 QQ 群发出取消公告。"
+            else "将关闭报名并在 QQ 群发出取消消息。"
         )
         return page(
             f"确认{title}",

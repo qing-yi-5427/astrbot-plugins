@@ -20,6 +20,7 @@ from .store import (
     PAGE_SIZE,
     STATUSES,
     Actor,
+    EarlyDrawRequired,
     RaffleError,
     Store,
     display_time,
@@ -36,7 +37,8 @@ HELP = (
     "有多场时机器人会列出编号和奖品，2 分钟内在原群只发对应的数字，例如 12。"
     "直接发数字，不要引用回复或 @ 机器人。也可以发 /抽奖 报名 12。"
     "每人每场只报一次，报名后会拿到固定序号。\n\n"
-    "③ 开奖｜截止后，发起人发 /抽奖 开奖。若有多场需要选择，"
+    "③ 开奖｜发起人发 /抽奖 开奖。未到截止时间时，机器人会询问是否提前开奖，"
+    "在原群于 2 分钟内发 /抽奖 确认 即可按当前名单开奖。若有多场需要选择，"
     "按提示发 /抽奖 开奖 编号。机器人从报名序号里随机抽取，"
     "公布抽中的号码，并 @ 开奖人和获奖人。群主和群管理员也可指定编号开奖。"
     "重复开奖只显示原结果。\n\n"
@@ -50,7 +52,7 @@ HELP = (
     "收到群内入口时，按页面提示在原群确认\n"
     "/抽奖 同步状态 · 查看腾讯文档同步进度\n\n"
     "报名截止时会 @ 发起人；离截止超过 1 小时发起的场次还有一次提前提醒。"
-    "发布后的发起、报名、开奖、取消与提醒记录在网页可查，并同步到本群绑定的腾讯文档「bot 抽奖记录」。"
+    "完整流水可在网页查询。抽奖、参与者和获奖人会更新到本群绑定的腾讯文档「bot 抽奖记录」。"
 )
 ACTIONS = {
     "帮助",
@@ -154,6 +156,7 @@ class RaffleService(FeatureService):
         super().__init__(context, config)
         self.tasks = []
         self.sync_states = {}
+        self.early_draws = {}
         self.document_bindings = {}
         self.binding_error = ""
         self.form_url = ""
@@ -405,7 +408,12 @@ class RaffleService(FeatureService):
             raffle = await asyncio.to_thread(
                 self.store.create, actor, title, slots, deadline, now
             )
-            return self.created_reply(raffle, title, slots, deadline, now)
+            return self.created_reply(raffle, actor.name, title, slots, deadline, now)
+        if action == "确认" and not args:
+            pending = self.early_draws.pop((actor.group, actor.qq), None)
+            if pending is None or pending[0] <= time.monotonic():
+                return "没有待确认的提前开奖，请先发 /抽奖 开奖。"
+            return await self.draw(actor, pending[1], now, with_mentions, early=True)
         if action == "确认" and len(args) == 1:
             self.require_document(actor)
             code = args[0].upper()
@@ -414,7 +422,7 @@ class RaffleService(FeatureService):
             raffle, title, slots, deadline = await asyncio.to_thread(
                 self.store.confirm_form, actor, code, now
             )
-            return self.created_reply(raffle, title, slots, deadline, now)
+            return self.created_reply(raffle, actor.name, title, slots, deadline, now)
         if action == "同步状态" and not args:
             group = actor.group.rsplit(":", 1)[-1]
             state = self.binding_error or self.sync_states.get(
@@ -458,6 +466,8 @@ class RaffleService(FeatureService):
             return self.paginate(lines, people, f"/抽奖 名单 {raffle_id}", page)
         if action == "报名" and not args:
             return await self.join_prompt(actor, now)
+        if action == "开奖":
+            self.early_draws.pop((actor.group, actor.qq), None)
         if action == "开奖" and not args:
             return await self.choose_draw(actor, now, with_mentions)
         if action in ("报名", "开奖", "取消") and len(args) == 1:
@@ -517,23 +527,45 @@ class RaffleService(FeatureService):
             lines.append("其余场次可以用 /抽奖 列表 或在管理台查看。")
         return "\n".join(lines)
 
-    async def draw(self, actor, raffle_id, now, with_mentions):
-        fresh, raffle, _ = await asyncio.to_thread(
-            self.store.close, actor, raffle_id, now
-        )
+    async def draw(self, actor, raffle_id, now, with_mentions, *, early=False):
+        try:
+            fresh, raffle, _ = await asyncio.to_thread(
+                self.store.close, actor, raffle_id, now, early=early
+            )
+        except EarlyDrawRequired as exc:
+            moment = time.monotonic()
+            self.early_draws = {
+                key: pending
+                for key, pending in self.early_draws.items()
+                if pending[0] > moment
+            }
+            self.early_draws[(actor.group, actor.qq)] = (
+                moment + CHOICE_SECONDS,
+                raffle_id,
+            )
+            return (
+                f"抽奖 #{raffle_id}「{exc.title}」原定 {display_time(exc.deadline)} 截止（北京时间）。"
+                "要按当前报名名单提前开奖吗？请在 2 分钟内发 /抽奖 确认。"
+            )
         if fresh and with_mentions:
             return DrawReply(dict(raffle), actor.qq)
         prefix = "" if fresh else "这场已经开过奖，以下是原结果。\n"
         return prefix + self.result(raffle, 1)
 
     @staticmethod
-    def created_reply(raffle, title, slots, deadline, now):
+    def created_reply(raffle, creator, title, slots, deadline, now, *, state="open"):
+        text = (
+            f"抽奖 #{raffle} 已发起｜{title}\n发起人：{creator}｜抽 {slots} 人\n"
+            f"截止：{display_time(deadline)}（北京时间）"
+        )
+        if state != "open":
+            return f"{text}\n当前状态：{STATUSES[state]}。"
         reminder = (
             "截止前一小时和截止时会提醒发起人。"
             if deadline - now > 3600
             else "距截止不超过一小时，截止时会提醒发起人。"
         )
-        return f"抽奖 #{raffle} 已发起｜{title}\n抽 {slots} 人，{display_time(deadline)} 截止（北京时间）。\n报名：/抽奖 报名 或 /抽奖 报名 {raffle}\n{reminder}"
+        return f"{text}\n报名：/抽奖 报名 或 /抽奖 报名 {raffle}\n{reminder}"
 
     @staticmethod
     def paginate(lines, records, command, page):
@@ -620,19 +652,18 @@ class RaffleService(FeatureService):
                     f"抽奖 #{number}「{raffle['title']}」已从网页管理台取消。"
                 ),
             )
-        elif now >= raffle["deadline"]:
-            messages = (
-                MessageChain().message(
-                    f"网页发起的抽奖 #{number}「{raffle['title']}」报名已截止。"
-                ),
-            )
         else:
+            state = raffle["status"]
+            if state == "open" and now >= raffle["deadline"]:
+                state = "closed"
             text = self.created_reply(
                 number,
+                raffle["creator"] or "群友",
                 raffle["title"],
                 raffle["slots"],
                 raffle["deadline"],
                 raffle["due"],
+                state=state,
             )
             messages = (MessageChain().message(text),)
         group = int(raffle["scope"].rsplit(":", 1)[-1])
@@ -655,7 +686,7 @@ class RaffleService(FeatureService):
                     all_confirmed = False
             confirmed = all_confirmed
             if not confirmed:
-                self.logger.warning("抽奖 #%s 网页公告发送状态未确认", number)
+                self.logger.warning("抽奖 #%s 网页操作群消息发送状态未确认", number)
         finally:
             await asyncio.to_thread(
                 self.store.finish_notice, raffle, int(time.time()), confirmed

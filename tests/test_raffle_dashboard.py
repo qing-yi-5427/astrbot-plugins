@@ -176,7 +176,7 @@ async def test_dashboard_and_qq_use_same_records_and_permissions(raffle):
         match = await (
             await client.get("/panel?q=" + str(number), headers=member)
         ).text()
-        assert "&lt;抽奖礼物&gt;" in match and "待同步 1 条" in match
+        assert "&lt;抽奖礼物&gt;" in match and "待同步 1 场" in match
         member_html = await (await client.get(path, headers=member)).text()
         member_csrf = hidden("csrf", member_html)
         assert "导出名单" not in member_html
@@ -223,7 +223,10 @@ async def test_dashboard_and_qq_use_same_records_and_permissions(raffle):
         winners = await (await client.get(path, headers=member)).text()
         assert "开奖结果" in winners and "抽中序号" in winners
         assert "恭喜 =报名人 中奖" in await service.execute(MEMBER, f"结果 {number}")
-        assert [row["kind"] for row in store.pending_notices()] == ["网页开奖"]
+        assert [row["kind"] for row in store.pending_notices()] == [
+            "网页发布",
+            "网页开奖",
+        ]
 
         roles[(ADMIN.group, ADMIN.qq)] = Actor(ADMIN.group, ADMIN.qq, ADMIN.name)
         assert (await client.get(path + "/export/audit", headers=admin)).status == 403
@@ -292,4 +295,4 @@ async def test_onebot_live_role_and_notice_receipts(raffle):
     ]
     assert len(sent) == 1 and sent[0].kwargs["group_id"] == 123
     assert f"抽奖 #{number} 已发起" in sent[0].kwargs["message"][0]["data"]["text"]
-    assert [row["kind"] for row in store.unsynced(0)] == ["发起", "QQ 公告已取得回执"]
+    assert [row["kind"] for row in store.unsynced(0)] == ["发起", "QQ 群消息已取得回执"]

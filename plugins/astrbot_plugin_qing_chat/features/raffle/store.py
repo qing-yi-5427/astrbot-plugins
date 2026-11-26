@@ -30,6 +30,13 @@ class RaffleError(ValueError):
     pass
 
 
+class EarlyDrawRequired(RaffleError):
+    def __init__(self, raffle):
+        self.title = raffle["title"]
+        self.deadline = raffle["deadline"]
+        super().__init__(f"报名还未截止，{display_time(self.deadline)} 后可以开奖。")
+
+
 def validate_details(title, slots, when, now):
     title = " ".join(title.split())
     if not 1 <= len(title) <= 120:
@@ -298,7 +305,7 @@ class Store:
             self.record(db, raffle, now, "报名", who.qq, who.name, detail)
             return slot, True
 
-    def close(self, who, number, now, *, cancel=False, web=False):
+    def close(self, who, number, now, *, cancel=False, web=False, early=False):
         with self.transaction(write=True) as db:
             raffle = self.get(db, who.group, number)
             if not who.can_manage(raffle):
@@ -317,14 +324,12 @@ class Store:
                     "UPDATE reminders SET status='skipped' WHERE raffle=? AND status='pending'",
                     (number,),
                 )
-                self.skip_web_open_notice(db, number)
                 if web:
                     self.queue_web_notice(db, number, "网页取消", now)
                 return True, raffle, []
-            if now < raffle["deadline"]:
-                raise RaffleError(
-                    f"报名还未截止，{display_time(raffle['deadline'])} 后可以开奖。"
-                )
+            before_deadline = now < raffle["deadline"]
+            if before_deadline and not early:
+                raise EarlyDrawRequired(raffle)
             entrants = db.execute(
                 "SELECT number, qq, name FROM entrants WHERE raffle=? ORDER BY number",
                 (number,),
@@ -332,7 +337,15 @@ class Store:
             if not entrants:
                 raise RaffleError("本场无人报名，可用 /抽奖 取消 结束。")
             if raffle["status"] == "open":
-                self.record(db, raffle, now, "报名截止", detail={"人数": len(entrants)})
+                cutoff = {"人数": len(entrants)}
+                if before_deadline:
+                    cutoff["原因"] = "提前开奖"
+                self.record(db, raffle, now, "报名截止", detail=cutoff)
+            if before_deadline:
+                db.execute(
+                    "UPDATE reminders SET status='skipped' WHERE raffle=? AND status='pending'",
+                    (number,),
+                )
             winners = [
                 dict(row)
                 for row in SystemRandom().sample(
@@ -351,7 +364,8 @@ class Store:
             if web:
                 detail["来源"] = "网页"
                 self.queue_web_notice(db, number, "网页开奖", now)
-            self.skip_web_open_notice(db, number)
+            if before_deadline:
+                detail["提前开奖"] = True
             self.record(
                 db,
                 raffle,
@@ -374,13 +388,6 @@ class Store:
             return True, self.get(db, who.group, number), winners
 
     @staticmethod
-    def skip_web_open_notice(db, number):
-        db.execute(
-            "UPDATE web_notices SET status='skipped' WHERE raffle=? AND kind='网页发布' AND status='pending'",
-            (number,),
-        )
-
-    @staticmethod
     def queue_web_notice(db, number, kind, now):
         db.execute(
             "INSERT INTO web_notices (raffle,kind,due) VALUES (?,?,?)",
@@ -394,9 +401,13 @@ class Store:
                    CASE WHEN n.kind='网页开奖' THEN (
                      SELECT l.qq FROM ledger l
                      WHERE l.raffle=r.id AND l.kind='开奖' ORDER BY l.id DESC LIMIT 1
-                   ) END AS drawer
+                   ) END AS drawer,
+                   CASE WHEN n.kind='网页发布' THEN (
+                     SELECT l.name FROM ledger l WHERE l.raffle=r.id AND l.kind='发起'
+                     ORDER BY l.id LIMIT 1
+                   ) END AS creator
                    FROM web_notices n JOIN raffles r ON r.id=n.raffle
-                   WHERE n.status='pending' ORDER BY n.due,n.raffle"""
+                   WHERE n.status='pending' ORDER BY n.due,n.raffle,n.kind"""
             ).fetchall()
 
     def claim_notice(self, raffle):
@@ -421,7 +432,7 @@ class Store:
                 db,
                 raffle,
                 now,
-                "QQ 公告已取得回执" if confirmed else "QQ 公告发送状态未确认",
+                "QQ 群消息已取得回执" if confirmed else "QQ 群消息发送状态未确认",
                 detail={"类型": raffle["kind"]},
             )
 
@@ -529,6 +540,56 @@ class Store:
                 ).fetchall()
             return db.execute(
                 "SELECT * FROM ledger WHERE id>? ORDER BY id LIMIT 30", (after,)
+            ).fetchall()
+
+    def roll_rows(self, group, after):
+        scope = f"%:GroupMessage:{group}"
+        with self.transaction() as db:
+            events = db.execute(
+                """SELECT id,raffle FROM ledger WHERE scope LIKE ? AND id>?
+                   AND kind IN ('发起','报名','开奖') ORDER BY id LIMIT 30""",
+                (scope, after),
+            ).fetchall()
+            if not events:
+                return after, []
+            rows = []
+            for number in sorted({event["raffle"] for event in events}):
+                raffle = db.execute(
+                    """SELECT r.title,r.deadline,r.winners,
+                       (SELECT name FROM ledger WHERE raffle=r.id AND kind='发起'
+                        ORDER BY id LIMIT 1) AS creator,
+                       (SELECT count(*) FROM raffles WHERE scope LIKE ? AND id<=r.id) AS row_no
+                       FROM raffles r WHERE r.id=? AND r.scope LIKE ?""",
+                    (scope, number, scope),
+                ).fetchone()
+                if raffle is None:
+                    raise RuntimeError("Missing raffle for cloud projection")
+                entrants = db.execute(
+                    "SELECT name FROM entrants WHERE raffle=? ORDER BY number",
+                    (number,),
+                ).fetchall()
+                winners = "、".join(
+                    winner["name"] for winner in json.loads(raffle["winners"] or "[]")
+                )
+                rows.append(
+                    (
+                        raffle["row_no"],
+                        (
+                            raffle["creator"] or "群友",
+                            raffle["title"],
+                            winners,
+                            raffle["deadline"],
+                            *(entrant["name"] for entrant in entrants),
+                        ),
+                    )
+                )
+            return events[-1]["id"], rows
+
+    def legacy_roll_events(self, group, through):
+        with self.transaction() as db:
+            return db.execute(
+                "SELECT * FROM ledger WHERE scope LIKE ? AND id<=? ORDER BY id",
+                (f"%:GroupMessage:{group}", through),
             ).fetchall()
 
     def anonymous(self, value):

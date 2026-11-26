@@ -1,0 +1,24 @@
+{
+  "name": "qing-raffle-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remixicon/react": "4.9.0",
+    "react": "19.2.7",
+    "react-aria-components": "1.22.1",
+    "react-dom": "19.2.7",
+    "tailwind-merge": "3.7.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.5",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tailwindcss": "4.3.5",
+    "typescript": "5.9.3",
+    "vite": "8.4.0"
+  }
+}

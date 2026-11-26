@@ -1,3 +1,4 @@
+import json
 import re
 import time
 from datetime import datetime
@@ -6,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
-from astrbot_plugin_qing_chat.features.raffle.dashboard import QQUnavailable
+from astrbot_plugin_qing_chat.features.raffle.dashboard import QQUnavailable, page
 from astrbot_plugin_qing_chat.features.raffle.form import create_app
 from astrbot_plugin_qing_chat.features.raffle.main import RaffleService
 from astrbot_plugin_qing_chat.features.raffle.store import (
@@ -60,8 +61,24 @@ async def sign_in(client, service, actor):
     return {"Cookie": f"{COOKIE}={cookie.value}", "Origin": ORIGIN}
 
 
-def hidden(name, html):
-    return re.search(f'name="{name}" value="([^"]+)"', html)[1]
+def page_model(html):
+    body = re.search(
+        r'<script id="raffle-model" type="application/json">(.*?)</script>', html, re.S
+    )[1]
+    return json.loads(body)
+
+
+def test_page_model_escapes_markup_and_limits_inline_styles():
+    title = '</script><script>alert("sample")</script>'
+    response = page(title, "notice", {"message": title})
+    nonce = re.search(
+        r'<meta name="csp-nonce" nonce="([A-Za-z0-9_-]+)">', response.text
+    )[1]
+    policy = response.headers["Content-Security-Policy"]
+    assert f"style-src 'self' 'nonce-{nonce}'" in policy
+    assert "script-src 'self';" in policy and "'unsafe-inline'" not in policy
+    assert title not in response.text
+    assert page_model(response.text)["data"]["message"] == title
 
 
 def make_app(service, roles):
@@ -108,7 +125,7 @@ async def test_public_invite_requires_the_original_qq_and_browser(raffle):
         ).status == 403
         response = await client.post(path, headers={"Origin": ORIGIN})
         cookie = response.cookies[COOKIE].value
-        code = re.search(r"/抽奖 访问 ([0-9a-f-]+)", await response.text())[1]
+        code = page_model(await response.text())["data"]["command"].split()[-1]
         headers = {"Cookie": f"{COOKIE}={cookie}"}
         assert (await client.get("/panel", headers=headers)).status == 403
         for wrong in (OTHER, MEMBER):
@@ -140,7 +157,7 @@ async def test_dashboard_and_qq_use_same_records_and_permissions(raffle):
         member = await sign_in(client, service, MEMBER)
         admin = await sign_in(client, service, ADMIN)
         owner_panel = await (await client.get("/panel", headers=owner)).text()
-        owner_csrf = hidden("csrf", owner_panel)
+        owner_csrf = page_model(owner_panel)["account"]["csrf"]
         assert "其他群的奖品" not in owner_panel
         assert (
             await client.get(f"/panel/r/{other_number}", headers=owner)
@@ -160,8 +177,10 @@ async def test_dashboard_and_qq_use_same_records_and_permissions(raffle):
         )
         assert saved.status == 200
         review = await (await client.get("/panel/draft", headers=owner)).text()
-        assert "&lt;抽奖礼物&gt;" in review
-        data = {"csrf": owner_csrf, "code": hidden("code", review)}
+        assert "<抽奖礼物>" not in review
+        draft_data = page_model(review)["data"]["draft"]
+        assert draft_data["title"] == "<抽奖礼物>"
+        data = {"csrf": owner_csrf, "code": draft_data["code"]}
         published = await client.post(
             "/panel/draft", headers=owner, data=data, allow_redirects=False
         )
@@ -176,10 +195,13 @@ async def test_dashboard_and_qq_use_same_records_and_permissions(raffle):
         match = await (
             await client.get("/panel?q=" + str(number), headers=member)
         ).text()
-        assert "&lt;抽奖礼物&gt;" in match and "待同步 1 场" in match
+        match_data = page_model(match)["data"]
+        assert match_data["rows"][0]["title"] == "<抽奖礼物>"
+        assert "待同步 1 场" in match_data["sync"]["progress"]
         member_html = await (await client.get(path, headers=member)).text()
-        member_csrf = hidden("csrf", member_html)
-        assert "导出名单" not in member_html
+        member_model = page_model(member_html)
+        member_csrf = member_model["account"]["csrf"]
+        assert member_model["data"]["management"] is None
         assert (
             await client.get(path + "/export/participants", headers=member)
         ).status == 403
@@ -201,7 +223,7 @@ async def test_dashboard_and_qq_use_same_records_and_permissions(raffle):
         ).status == 303
         assert "你已报名" in await service.execute(MEMBER, f"报名 {number}")
         joined = await (await client.get("/panel?view=joined", headers=member)).text()
-        assert "我的报名序号 1" in joined
+        assert page_model(joined)["data"]["rows"][0]["own"] == 1
         owner_csv = await client.get(path + "/export/participants", headers=owner)
         assert owner_csv.status == 200 and "'=报名人" in await owner_csv.text()
         assert (
@@ -215,13 +237,13 @@ async def test_dashboard_and_qq_use_same_records_and_permissions(raffle):
             await client.post(
                 path + "/draw",
                 headers=admin,
-                data={"csrf": hidden("csrf", admin_page)},
+                data={"csrf": page_model(admin_page)["account"]["csrf"]},
                 allow_redirects=False,
             )
         ).status == 303
         assert "已经开过奖" in await service.execute(OWNER, f"开奖 {number}")
         winners = await (await client.get(path, headers=member)).text()
-        assert "开奖结果" in winners and "抽中序号" in winners
+        assert page_model(winners)["data"]["winners"]["rows"] == [[1, "=报名人"]]
         assert "恭喜 =报名人 中奖" in await service.execute(MEMBER, f"结果 {number}")
         assert [row["kind"] for row in store.pending_notices()] == [
             "网页发布",

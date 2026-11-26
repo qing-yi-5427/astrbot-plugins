@@ -55,6 +55,8 @@ AstrBot 网页端打开 **插件**，找到 **对话管理** 或 **图片与主�
 
 本地 SQLite 保存完整抽奖流水，网页可查看。腾讯文档每场抽奖占一行，按顺序写入发起人、内容、获奖人、截止时间，以及从「参与通道」列向右排列的参与昵称。获奖人在开奖后填入同一行。机器人按原始行列更新，建议使用筛选查看。云端暂不可用时，本地抽奖照常处理，恢复后继续同步。
 
+抽奖后台的前端位于 `frontend/raffle-dashboard`，使用 [BoardUI](https://www.boardui.com/components) 的 MIT 基础组件。修改后在仓库根目录执行 `npm --prefix frontend/raffle-dashboard ci`、`npm --prefix frontend/raffle-dashboard run check` 和 `npm --prefix frontend/raffle-dashboard run build`，将构建后的静态资产与插件一并打包。AstrBot 直接提供这些资产。
+
 ### 图片与主题
 
 | 分组 | 可调整内容 |

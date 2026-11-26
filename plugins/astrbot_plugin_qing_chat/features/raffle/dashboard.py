@@ -1,10 +1,12 @@
-"""Server-rendered raffle dashboard. Group commands authorize and publish changes."""
+"""Authorized page models and form handlers for the raffle dashboard."""
 
 import asyncio
 import csv
 import hmac
 import io
+import json
 import re
+import secrets
 import time
 from html import escape
 from pathlib import Path
@@ -40,36 +42,40 @@ class QQUnavailable(RuntimeError):
     """A current group role could not be verified."""
 
 
-def page(title, body, *, header="", status=200):
+def page(title, view, data, *, account=None, status=200):
+    nonce = secrets.token_urlsafe(16)
+    # React Aria reads this nonce for its press and overlay styles.
+    policy = HEADERS["Content-Security-Policy"].replace(
+        "style-src 'self';", f"style-src 'self' 'nonce-{nonce}';"
+    )
+    model = json.dumps(
+        {"title": title, "view": view, "data": data, "account": account},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).replace("<", r"\u003c")
     return web.Response(
         text=f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{escape(title)} · 群抽奖</title><link rel="stylesheet" href="/assets/raffle.css">
-<script src="/assets/raffle.js" defer></script></head><body>
-<header><div class="nav"><a class="brand" href="/"><span aria-hidden="true">✦</span> QQ 群抽奖</a>
-{header}</div></header><main>{body}</main></body></html>""",
+<meta name="csp-nonce" nonce="{nonce}">
+<title>{escape(title)} · QQ 群抽奖</title><link rel="stylesheet" href="/assets/raffle.css">
+<script type="module" src="/assets/raffle.js"></script></head><body>
+<div id="raffle-app"></div>
+<script id="raffle-model" type="application/json">{model}</script>
+<noscript>请启用 JavaScript 后使用抽奖管理台。</noscript></body></html>""",
         status=status,
         content_type="text/html",
-        headers=HEADERS,
+        headers={**HEADERS, "Content-Security-Policy": policy},
     )
 
 
-def copy_command(label, text, show=False):
-    command = escape(text, quote=True)
-    visible = (
-        f'<input class="command" aria-label="QQ 指令" readonly value="{command}">'
-        if show
-        else ""
+def notice(title, message, *, status=200, action=None, back=None, account=None):
+    return page(
+        title,
+        "notice",
+        {"message": message, "action": action, "back": back},
+        status=status,
+        account=account,
     )
-    return (
-        f'<div class="copy">{visible}<button type="button" class="secondary" '
-        f'data-copy="{command}">{escape(label)}</button></div>'
-    )
-
-
-def post_button(path, name, csrf=None, css=""):
-    field = f'<input type="hidden" name="csrf" value="{csrf}">' if csrf else ""
-    return f'<form method="post" action="{path}">{field}<button class="{css}">{name}</button></form>'
 
 
 def page_number(request):
@@ -91,111 +97,46 @@ def panel_url(filters, **overrides):
     return f"/panel?{query}" if query else "/panel"
 
 
-def status_badge(state):
-    return f'<span class="badge {state}">{STATUSES[state]}</span>'
-
-
-def pagination(page_no, more, link):
-    previous = (
-        f'<a class="secondary" href="{escape(link(page_no - 1))}">上一页</a>'
-        if page_no > 1
-        else ""
-    )
-    following = (
-        f'<a class="secondary" href="{escape(link(page_no + 1))}">下一页</a>'
-        if more
-        else ""
-    )
-    if previous or following:
-        return f'<nav class="pager" aria-label="分页">{previous}<span>第 {page_no} 页</span>{following}</nav>'
-    return ""
-
-
-def table(headers, rows, empty):
-    if not rows:
-        return f'<p class="muted">{empty}</p>'
-    head = "".join(f'<th scope="col">{name}</th>' for name in headers)
-    body = "".join(
-        "<tr>" + "".join(f"<td>{escape(str(cell))}</td>" for cell in row) + "</tr>"
-        for row in rows
-    )
-    return f'<div class="table"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
-
-
-def list_card(row, actor):
-    raffle_id = row["id"]
-    labels = []
-    if row["owner"] == actor.qq:
-        labels.append("我发起的")
-    if row["my_number"] is not None:
-        labels.append(f"我的报名序号 {row['my_number']}")
-    mine = f'<p class="hint">{escape(" · ".join(labels))}</p>' if labels else ""
-    return f"""<li class="raffle"><a href="/panel/r/{raffle_id}">
-<div class="item-head"><span class="number">#{raffle_id}</span>{status_badge(row["state"])}</div>
-<h2>{escape(row["title"])}</h2>
-<p class="raffle-meta">{row["people"]} 人报名 <span>·</span> 抽 {row["slots"]} 人</p>
-<p class="raffle-meta">{display_time(row["deadline"])} 截止</p>{mine}</a></li>"""
+def pagination(number, more, link):
+    return {
+        "page": number,
+        "previous": link(number - 1) if number > 1 else None,
+        "next": link(number + 1) if more else None,
+    }
 
 
 def locked():
-    return page(
-        "需要机器人发来的链接",
-        '<section class="intro"><h1>群抽奖管理台</h1>'
-        "<p>在 QQ 群发 <strong>/抽奖管理</strong>，用机器人发来的限时链接进入。</p></section>",
+    return notice(
+        "QQ 群抽奖",
+        "在 QQ 群发 /抽奖管理，用机器人发来的限时链接进入。",
         status=403,
     )
 
 
 def invite_invalid():
-    return page(
+    return notice(
         "链接已失效",
-        '<section class="intro"><h1>链接已失效</h1>'
-        "<p>如果已开启网页会话，可回到管理台。需要新链接时，在原群发 /抽奖管理。</p>"
-        '<a class="button" href="/panel">返回管理台</a></section>',
+        "需要新链接时，在原群发 /抽奖管理。",
         status=404,
+        action={"label": "返回管理台", "href": "/panel"},
     )
 
 
-def shared_body(challenge):
-    return f"""<section class="intro">
-<h1>在原群确认访问</h1><p>群里的链接需要由领取它的 QQ 号确认。</p>
-{copy_command("复制访问确认指令", f"/抽奖 访问 {challenge}", show=True)}
-<p class="hint">在原群发送当前页面上的指令，确认后回到这个页面。</p>
-<div class="actions"><a class="button" href="/panel">我已确认，进入管理台</a></div></section>"""
+def result_row(row, actor):
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "state": row["state"],
+        "deadline": display_time(row["deadline"]),
+        "people": row["people"],
+        "slots": row["slots"],
+        "own": row["my_number"],
+        "created": row["owner"] == actor.qq,
+    }
 
 
-def filters_bar(filters, counts):
-    options = (("", "查看范围"), ("mine", "我发起的"), ("joined", "我报名的"))
-    select = "".join(
-        f'<option value="{value}"{" selected" if filters.view == value else ""}>{label}</option>'
-        for value, label in options
-    )
-    tabs = []
-    for value, label in [("", "全部"), *STATUSES.items()]:
-        url = escape(panel_url(filters, status=value, page=1))
-        total = counts.get(value, 0) if value else sum(counts.values())
-        current = ' aria-current="page"' if value == filters.status else ""
-        tabs.append(f'<a href="{url}"{current}>{label} <span>{total}</span></a>')
-    return f"""<nav class="tabs" aria-label="抽奖状态">{"".join(tabs)}</nav>
-<form class="filters" method="get" action="/panel">
-<input type="hidden" name="status" value="{filters.status}">
-<input name="q" aria-label="奖品或抽奖编号" placeholder="搜索奖品或抽奖编号" value="{escape(filters.query)}">
-<select name="view" aria-label="查看范围">{select}</select>
-<button class="secondary">筛选</button></form>"""
-
-
-def detail_body(
-    raffle,
-    own,
-    total,
-    winners,
-    entries,
-    audit,
-    reminders,
-    actor,
-    now,
-    current_page,
-    csrf,
+def detail_model(
+    raffle, own, total, winners, entries, audit, reminders, actor, now, current_page
 ):
     number = raffle["id"]
     path = f"/panel/r/{number}"
@@ -203,49 +144,20 @@ def detail_body(
     manage = actor.can_manage(raffle)
     actions = []
     if state == "open" and own is None:
-        actions.append(post_button(f"{path}/join", "报名", csrf))
+        actions.append({"label": "报名", "href": f"{path}/join", "method": "post"})
     if manage and state == "closed" and total:
-        actions.append(f'<a class="button" href="{path}/draw">开奖</a>')
+        actions.append({"label": "开奖", "href": f"{path}/draw"})
     if manage and state in {"open", "closed"}:
-        actions.append(f'<a class="secondary" href="{path}/cancel">取消抽奖</a>')
-    controls = f'<div class="actions">{"".join(actions)}</div>' if actions else ""
-    my_entry = (
-        f'<p class="hint">我的报名序号 <strong>{own}</strong></p>'
-        if own is not None
-        else ""
-    )
-    header = f"""<a class="back" href="/panel">← 抽奖列表</a>
-<section class="detail"><div class="item-head"><span class="number">#{number}</span>{status_badge(state)}</div>
-<h1>{escape(raffle["title"])}</h1>
-<div class="facts"><div><span>报名人数</span><strong>{total}</strong></div>
-<div><span>计划中奖</span><strong>{raffle["slots"]}</strong></div>
-<div><span>截止时间 · 北京时间</span><strong>{display_time(raffle["deadline"])}</strong></div></div>
-{my_entry}{controls}</section>"""
-
+        actions.append(
+            {"label": "取消抽奖", "href": f"{path}/cancel", "secondary": True}
+        )
     start = (current_page - 1) * PAGE_SIZE
     results = winners[start : start + PAGE_SIZE + 1]
-    sections = []
-    if state == "drawn":
-        won = table(
-            ("抽中序号", "中奖昵称"),
-            [(row["number"], row["name"]) for row in results[:PAGE_SIZE]],
-            "本页没有中奖记录。",
-        )
-        sections.append(f"""<section class="surface"><h2>开奖结果</h2>
-<p>共 {raffle["eligible"]} 人报名，从固定报名序号中随机抽中 {len(winners)} 人。</p>{won}</section>""")
+    management = None
     if manage:
-        links = {
-            key: f'<a class="text-link" href="{path}/export/{key}">{name}</a>'
-            for key, name in EXPORTS.items()
-        }
-        roster = table(
-            ("序号", "昵称"),
-            [tuple(row) for row in entries[:PAGE_SIZE]],
-            "本页没有报名记录。",
-        )
-        history = table(
-            ("时间", "事件", "昵称", "详情"),
-            [
+        management = {
+            "participants": [tuple(row) for row in entries[:PAGE_SIZE]],
+            "audit": [
                 (
                     display_time(row["at"]),
                     row["kind"],
@@ -254,29 +166,41 @@ def detail_body(
                 )
                 for row in audit[:PAGE_SIZE]
             ],
-            "本页没有操作记录。",
-        )
-        alerts = table(
-            ("提醒", "预定时间", "发送状态"),
-            [
+            "reminders": [
                 (row["kind"], display_time(row["due"]), REMINDERS[row["status"]])
                 for row in reminders
             ],
-            "这场抽奖没有提醒记录。",
-        )
-        sections.extend(
-            [
-                f'<section class="surface"><div class="item-head"><h2>报名名单</h2>{links["participants"]}</div>{roster}</section>',
-                f'<section class="surface"><div class="item-head"><h2>操作流水</h2>{links["audit"]}</div>{history}</section>',
-                f'<section class="surface"><h2>QQ 提醒与群消息</h2>{alerts}</section>',
-            ]
-        )
-    pager = pagination(
-        current_page,
-        max(len(entries), len(audit), len(results)) > PAGE_SIZE,
-        lambda n: f"{path}?page={n}",
-    )
-    return header + "".join(sections) + pager
+            "exports": {
+                kind: {
+                    "href": f"{path}/export/{kind}",
+                    "label": label,
+                    "secondary": True,
+                }
+                for kind, label in EXPORTS.items()
+            },
+        }
+    return {
+        "id": number,
+        "state": state,
+        "own": own,
+        "people": total,
+        "slots": raffle["slots"],
+        "deadline": display_time(raffle["deadline"]),
+        "actions": actions,
+        "management": management,
+        "winners": {
+            "eligible": raffle["eligible"],
+            "count": len(winners),
+            "rows": [(row["number"], row["name"]) for row in results[:PAGE_SIZE]],
+        }
+        if state == "drawn"
+        else None,
+        "pager": pagination(
+            current_page,
+            max(len(entries), len(audit), len(results)) > PAGE_SIZE,
+            lambda n: f"{path}?page={n}",
+        ),
+    }
 
 
 def csv_cell(value):
@@ -287,12 +211,13 @@ def csv_cell(value):
     return value
 
 
-def operation_error(message, path):
-    return page(
+def operation_error(message, path, account):
+    return notice(
         "操作未完成",
-        f'<section class="intro"><h1>操作未完成</h1><p>{escape(message)}</p>'
-        f'<a class="text-link" href="{path}">返回查看当前状态</a></section>',
+        message,
         status=409,
+        account=account,
+        action={"href": path, "label": "返回查看当前状态"},
     )
 
 
@@ -329,10 +254,10 @@ class Dashboard:
             if grant["private"]
             else "请点击继续，由领取者在原 QQ 群确认本次访问。"
         )
-        return page(
+        return notice(
             "打开抽奖管理台",
-            f'<section class="intro"><h1>打开抽奖管理台</h1><p>{hint}</p>'
-            f"{post_button('/a/' + token, '继续')}</section>",
+            hint,
+            action={"href": "/a/" + token, "label": "继续", "method": "post"},
         )
 
     async def activate(self, request):
@@ -344,7 +269,9 @@ class Dashboard:
             return invite_invalid()
         if not grant["private"]:
             browser, challenge = self.auth.shared_challenge(token)
-            response = page("确认访问", shared_body(challenge))
+            response = page(
+                "在原群确认访问", "pairing", {"command": f"/抽奖 访问 {challenge}"}
+            )
             self.set_cookie(response, browser, INVITE_TTL + SESSION_TTL)
             return response
         browser = await asyncio.to_thread(self.auth.accept_private, token, now)
@@ -391,24 +318,32 @@ class Dashboard:
         try:
             actor = await self.resolve_actor(session)
         except QQUnavailable:
-            return None, page(
-                "QQ 暂不可用",
-                '<section class="intro"><h1>暂时无法核对群身份</h1><p>请等 QQ 机器人重新连接后再试。</p></section>',
+            return None, notice(
+                "暂时无法核对群身份",
+                "请等 QQ 机器人重新连接后再试。",
                 status=503,
             )
         if actor is None:
-            return None, page(
-                "无法访问本群",
-                f'<section class="intro"><h1>当前无法访问本群</h1><p>请确认你仍在该群，或退出后重新登录。</p>'
-                f"{post_button('/logout', '退出登录', self.csrf(request))}</section>",
+            return None, notice(
+                "当前无法访问本群",
+                "请确认你仍在该群，或退出后重新领取入口。",
                 status=403,
+                action={
+                    "href": "/logout",
+                    "method": "post",
+                    "label": "退出登录",
+                    "csrf": self.csrf(request),
+                },
             )
         return actor, None
 
-    def header(self, request, actor):
-        role = "群管理" if actor.moderator else "群成员"
-        logout = post_button("/logout", "退出", self.csrf(request), "secondary")
-        return f'<div class="identity"><span>{escape(actor.name)} · {role}</span>{logout}</div>'
+    def account(self, request, actor):
+        return {
+            "name": actor.name,
+            "role": "群管理" if actor.moderator else "群成员",
+            "group": actor.group.rsplit(":", 1)[-1],
+            "csrf": self.csrf(request),
+        }
 
     async def logout(self, request):
         await self.check_post(request, require_csrf=True)
@@ -439,23 +374,33 @@ class Dashboard:
         progress = (
             f"已同步 {written} 场 · 待同步 {pending} 场" if replica else "本地保存"
         )
-        listing = (
-            f'<ul class="raffles">{"".join(list_card(row, actor) for row in rows[:PAGE_SIZE])}</ul>'
-            if rows
-            else '<section class="surface empty"><h2>没有匹配的抽奖</h2><p>可以调整筛选，或准备一场新抽奖。</p></section>'
-        )
-        compose = post_button("/panel/new", "准备新抽奖", self.csrf(request))
-        pager = pagination(
-            filters.page, len(rows) > PAGE_SIZE, lambda n: panel_url(filters, page=n)
-        )
         return page(
             "抽奖管理台",
-            f"""<section class="hero"><div><p class="group">QQ群 {escape(group)}</p>
-<h1>抽奖管理台</h1><p>网页与 QQ 群共用抽奖记录，时间按北京时间显示。</p></div>
-<div class="compose">{compose}<a href="/panel/draft">待发布草稿</a></div></section>
-<section class="sync"><strong>腾讯文档</strong><span>{escape(sync)}</span><span>{progress}</span></section>
-{filters_bar(filters, counts)}{listing}{pager}""",
-            header=self.header(request, actor),
+            "panel",
+            {
+                "rows": [result_row(row, actor) for row in rows[:PAGE_SIZE]],
+                "filters": {
+                    "query": filters.query,
+                    "status": filters.status,
+                    "view": filters.view,
+                },
+                "tabs": [
+                    {
+                        "id": key or "all",
+                        "label": label,
+                        "count": counts.get(key, 0) if key else sum(counts.values()),
+                        "href": panel_url(filters, status=key, page=1),
+                    }
+                    for key, label in [("", "全部"), *STATUSES.items()]
+                ],
+                "sync": {"state": sync, "progress": progress},
+                "pager": pagination(
+                    filters.page,
+                    len(rows) > PAGE_SIZE,
+                    lambda n: panel_url(filters, page=n),
+                ),
+            },
+            account=self.account(request, actor),
         )
 
     async def new_draft(self, request):
@@ -470,7 +415,7 @@ class Dashboard:
                 self.store.new_form, actor, int(time.time())
             )
         except RaffleError as exc:
-            return operation_error(str(exc), "/panel")
+            return operation_error(str(exc), "/panel", self.account(request, actor))
         raise web.HTTPSeeOther("/f/" + token, headers=HEADERS)
 
     async def draft(self, request):
@@ -478,20 +423,19 @@ class Dashboard:
         if failure is not None:
             return failure
         row = await asyncio.to_thread(self.store.current_draft, actor, int(time.time()))
-        if row is None:
-            body = "<p>没有可发布的草稿。</p>"
-        else:
-            code = escape(row["code"])
-            body = f"""<p><strong>{escape(row["title"])}</strong></p>
-<p>抽 {row["slots"]} 人 · {display_time(row["deadline"])} 截止（北京时间）</p>
-<p>发布后，机器人会在原 QQ 群发出报名消息。</p>
-<form method="post" action="/panel/draft">
-<input type="hidden" name="csrf" value="{self.csrf(request)}">
-<input type="hidden" name="code" value="{code}"><button>发布到 QQ 群</button></form>"""
+        draft = None
+        if row is not None:
+            draft = {
+                "title": row["title"],
+                "code": row["code"],
+                "slots": row["slots"],
+                "deadline": display_time(row["deadline"]),
+            }
         return page(
             "待发布草稿",
-            f'<a class="back" href="/panel">← 抽奖列表</a><section class="detail"><h1>待发布草稿</h1>{body}</section>',
-            header=self.header(request, actor),
+            "draft",
+            {"draft": draft},
+            account=self.account(request, actor),
         )
 
     async def publish(self, request):
@@ -510,7 +454,9 @@ class Dashboard:
                 self.store.confirm_form, actor, code, int(time.time()), web=True
             )
         except RaffleError as exc:
-            return operation_error(str(exc), "/panel/draft")
+            return operation_error(
+                str(exc), "/panel/draft", self.account(request, actor)
+            )
         raise web.HTTPSeeOther(f"/panel/r/{number}", headers=HEADERS)
 
     async def raffle(self, request):
@@ -527,10 +473,9 @@ class Dashboard:
             raise web.HTTPNotFound(headers=HEADERS) from None
         return page(
             result[0]["title"],
-            detail_body(
-                *result, actor, int(time.time()), current_page, self.csrf(request)
-            ),
-            header=self.header(request, actor),
+            "raffle",
+            detail_model(*result, actor, int(time.time()), current_page),
+            account=self.account(request, actor),
         )
 
     async def confirm_operation(self, request):
@@ -554,13 +499,17 @@ class Dashboard:
             if operation == "draw"
             else "将关闭报名并在 QQ 群发出取消消息。"
         )
-        return page(
+        return notice(
             f"确认{title}",
-            f"""<a class="back" href="{path}">← 返回抽奖详情</a>
-<section class="intro"><h1>确认{title}</h1>
-<p>#{number} · {escape(raffle["title"])}</p><p>{description}</p>
-{post_button(f"{path}/{operation}", f"确认{title}", self.csrf(request))}</section>""",
-            header=self.header(request, actor),
+            f"#{number} · {raffle['title']}。{description}",
+            action={
+                "href": f"{path}/{operation}",
+                "label": f"确认{title}",
+                "method": "post",
+                "danger": operation == "cancel",
+            },
+            back={"href": path, "label": "返回抽奖详情"},
+            account=self.account(request, actor),
         )
 
     async def operate(self, request):
@@ -594,7 +543,7 @@ class Dashboard:
                     web=True,
                 )
         except RaffleError as exc:
-            return operation_error(str(exc), path)
+            return operation_error(str(exc), path, self.account(request, actor))
         raise web.HTTPSeeOther(path, headers=HEADERS)
 
     async def export(self, request):
